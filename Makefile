@@ -20,7 +20,7 @@ CFLAGS=-std=gnu23 -O2 -g -Wall -Wno-unknown-pragmas -Wno-missing-braces -ffuncti
 # -iquote: only "vk_bootstrap.h" comes from dx11um; its dxgi.h must not shadow <dxgi.h>.
 CFLAGS+=$(addprefix -I,$(INCLUDES)) -iquote $(D3D11_DIR)
 LDFLAGS=-g -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic -Wl,--gc-sections
-LIBS=version gdi32 advapi32 ole32 dxguid pathcch
+LIBS=version gdi32 user32 advapi32 ole32 dxguid pathcch
 
 # vkd3d-proton without libs/d3d12 and libs/d3d12core: those are the DLL entry
 # points and pull in dxgi.dll; the runtime talks to us through the DDI instead.
@@ -29,7 +29,7 @@ VKD3D_LIBS=$(addprefix $(VKD3D_BUILD)/,libs/vkd3d/libvkd3d-proton.a libs/vkd3d-s
            subprojects/dxil-spirv/libdxbc_spv_module.a subprojects/dxil-spirv/subprojects/dxbc-spirv/libdxbc_spv.a)
 
 UMD_NAME := dx12um_virtio
-OBJS=$(addprefix $(BUILD_DIR)/,d3d12_adapter.o d3d12_caps.o d3d12_device.o d3d12_objects.o d3d12_resource.o \
+OBJS=$(addprefix $(BUILD_DIR)/,d3d12_adapter.o d3d12_caps.o d3d12_device.o d3d12_objects.o d3d12_resource.o d3d12_present.o \
      d3d12_descriptor.o d3d12_pipeline.o d3d12_cmdlist.o d3d12_queue.o ddi_stubs.o d3d12_vkd3d_glue.o \
      d3d12_kmt_trace.o vk_bootstrap.o)
 

@@ -155,7 +155,6 @@ static HRESULT APIENTRY create_heap_and_resource(D3D12DDI_HDEVICE hDevice, const
                                                  const D3D12DDI_CLEAR_VALUES *clear,
                                                  D3D12DDI_HPROTECTEDRESOURCESESSION_0030 session,
                                                  D3D12DDI_HRESOURCE hResource) {
-    (void)hRTResource;
     (void)session;
     D3D12_UMD_Device *device = umd_device(hDevice);
     D3D12_UMD_Heap *heap = heap_args ? hHeap.pDrvPrivate : NULL;
@@ -172,7 +171,14 @@ static HRESULT APIENTRY create_heap_and_resource(D3D12DDI_HDEVICE hDevice, const
 
     HRESULT hr = E_INVALIDARG;
     const char *what = "?";
-    if (heap && resource && desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) {
+    if (heap_args && (heap_args->Flags & D3D12DDI_HEAP_FLAG_PRIMARY)) {
+        what = "primary texture";
+        if (heap && resource) {
+            heap->desc = heap_desc(heap_args);
+            resource->desc = desc;
+            hr = d3d12_umd_create_primary(device, resource, hRTResource);
+        }
+    } else if (heap && resource && desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) {
         what = "committed texture";
         D3D12_HEAP_PROPERTIES props = heap_properties(heap_args);
         hr = ID3D12Device_CreateCommittedResource(device->d3d12, &props, D3D12_HEAP_FLAG_NONE, &desc, state,
@@ -209,6 +215,8 @@ static HRESULT APIENTRY create_heap_and_resource(D3D12DDI_HDEVICE hDevice, const
     if (FAILED(hr)) {
         if (resource && resource->res)
             ID3D12Resource_Release(resource->res);
+        if (resource)
+            d3d12_umd_destroy_primary(device, resource);
         if (heap) {
             if (heap->span)
                 ID3D12Resource_Release(heap->span);
@@ -225,12 +233,13 @@ static HRESULT APIENTRY create_heap_and_resource(D3D12DDI_HDEVICE hDevice, const
 }
 
 static void APIENTRY destroy_heap_and_resource(D3D12DDI_HDEVICE hDevice, D3D12DDI_HHEAP hHeap, D3D12DDI_HRESOURCE hResource) {
-    (void)hDevice;
+    D3D12_UMD_Device *device = umd_device(hDevice);
     D3D12_UMD_Resource *resource = hResource.pDrvPrivate;
     D3D12_UMD_Heap *heap = hHeap.pDrvPrivate;
     if (resource) {
         if (resource->res)
             ID3D12Resource_Release(resource->res);
+        d3d12_umd_destroy_primary(device, resource);
         memset(resource, 0, sizeof(*resource));
     }
     if (heap) {

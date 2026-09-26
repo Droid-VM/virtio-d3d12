@@ -249,6 +249,11 @@ static void APIENTRY execute_command_lists(D3D12DDI_HCOMMANDQUEUE hQueue, UINT c
         free(vk);
 }
 
+HANDLE d3d12_umd_present_context(D3D12DDI_HCOMMANDQUEUE hQueue) {
+    D3D12_UMD_Queue *q = hQueue.pDrvPrivate;
+    return q ? q->ctx : NULL;
+}
+
 /* ---------------------------------------------------------------------------
  * Creation.
  */

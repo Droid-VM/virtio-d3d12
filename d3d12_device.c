@@ -108,6 +108,7 @@ void d3d12_umd_set_error(D3D12_UMD_Device *device, HRESULT hr) {
 }
 
 static void release_device(D3D12_UMD_Device *device) {
+    d3d12_umd_release_present_device(device);
     if (device->d3d12_4)
         ID3D12Device4_Release(device->d3d12_4);
     if (device->d3d12_2)
@@ -155,10 +156,13 @@ HRESULT APIENTRY d3d12_umd_create_device(D3D12DDI_HADAPTER hAdapter, const D3D12
     device->hRTDevice = pArgs->hRTDevice;
     device->kt = *pArgs->pKTCallbacks;
     device->um = pArgs->p12UMCallbacks;
+    device->um22 = pArgs->p12UMCallbacks_0022;
     device->flags = pArgs->Flags;
 
+    d3d12_umd_init_runtime_allocator(device);
     device->callbacks = (VkD3DDDICallbacks) {
         .sType = VK_STRUCTURE_TYPE_D3DDDI_CALLBACKS,
+        .pNext = &device->runtime_allocator,
         .AdapterLuid = adapter->caps.luid,
         .hRTAdapter = adapter->hRTAdapter.handle,
         .hRTDevice = device->hRTDevice.handle,
@@ -172,7 +176,8 @@ HRESULT APIENTRY d3d12_umd_create_device(D3D12DDI_HADAPTER hAdapter, const D3D12
     if (FAILED(hr))
         return hr;
 
-    if (FAILED(hr = create_vkd3d_device(device)) || FAILED(hr = init_runtime_context(device))) {
+    if (FAILED(hr = create_vkd3d_device(device)) || FAILED(hr = init_runtime_context(device)) ||
+        FAILED(hr = d3d12_umd_init_present_device(device))) {
         release_device(device);
         return hr;
     }

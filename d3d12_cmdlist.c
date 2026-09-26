@@ -591,8 +591,34 @@ void d3d12_umd_install_cmdlist_core(D3D12DDI_DEVICE_FUNCS_CORE_0040 *t) {
     t->pfnDestroyCommandList = destroy_command_list;
 }
 
-/* Present, Blt, CopyTiles and AtomicCopyBufferRegion stay generated stubs. */
+static void APIENTRY cl_present(D3D12DDI_HCOMMANDLIST hCL, D3D12DDI_HCOMMANDQUEUE hQueue,
+                                const D3D12DDIARG_PRESENT_0001 *args, D3D12DDI_PRESENT_0028 *out) {
+    D3D12_UMD_Device *device = umd_cl(hCL)->device;
+    memset(out, 0, sizeof(*out));
+    if (!args || args->SurfacesToPresent != 1 || !args->phSurfacesToPresent) {
+        d3d12_umd_set_error(device, E_INVALIDARG);
+        return;
+    }
+    D3D12_UMD_Resource *resource = umd_resource(args->phSurfacesToPresent[0].hSurface);
+    /* ECL installed the GPU completion wait on this context before returning;
+     * the runtime queues present after that wait. */
+    HANDLE context = d3d12_umd_present_context(hQueue);
+    if (!resource || !resource->hKMAllocation || !context) {
+        ERROR("present: invalid queue or primary surface (resource=%p allocation=0x%x context=%p)",
+              resource, resource ? resource->hKMAllocation : 0, context);
+        d3d12_umd_set_error(device, E_INVALIDARG);
+        return;
+    }
+    out->hSrcAllocation = resource->hKMAllocation;
+    out->hContext = context;
+    /* BroadcastContextCount counts additional contexts; this queue has one. */
+    out->BroadcastSrcAllocation[0] = resource->hKMAllocation;
+    out->BackBufferMultiplicity = 1;
+}
+
+/* Blt, CopyTiles and AtomicCopyBufferRegion stay generated stubs. */
 void d3d12_umd_install_cmdlist(D3D12DDI_COMMAND_LIST_FUNCS_3D_0040 *t) {
+    t->pfnPresent = cl_present;
     t->pfnCloseCommandList = cl_close;
     t->pfnResetCommandList = cl_reset;
     t->pfnDrawInstanced = cl_draw_instanced;
