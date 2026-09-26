@@ -80,7 +80,10 @@ static HRESULT create_vkd3d_device(D3D12_UMD_Device *device) {
         ERROR("%s: vkd3d_create_device failed: 0x%08lx", __FUNCTION__, hr);
         return hr;
     }
-    return S_OK;
+    if (FAILED(hr = ID3D12Device_QueryInterface(device->d3d12, &IID_ID3D12Device2, (void **)&device->d3d12_2)) ||
+        FAILED(hr = ID3D12Device_QueryInterface(device->d3d12, &IID_ID3D12Device4, (void **)&device->d3d12_4)))
+        ERROR("%s: vkd3d device lacks ID3D12Device2/4: 0x%08lx", __FUNCTION__, hr);
+    return hr;
 }
 
 /* ---------------------------------------------------------------------------
@@ -99,7 +102,18 @@ SIZE_T APIENTRY d3d12_umd_calc_private_device_size(D3D12DDI_HADAPTER hAdapter,
     return DEVICE_PRIVATE_SIZE;
 }
 
+void d3d12_umd_set_error(D3D12_UMD_Device *device, HRESULT hr) {
+    ERROR("device %p: 0x%08lx", device, hr);
+    device->um->pfnSetErrorCb(device->hRTDevice, hr);
+}
+
 static void release_device(D3D12_UMD_Device *device) {
+    if (device->d3d12_4)
+        ID3D12Device4_Release(device->d3d12_4);
+    if (device->d3d12_2)
+        ID3D12Device2_Release(device->d3d12_2);
+    device->d3d12_2 = NULL;
+    device->d3d12_4 = NULL;
     if (device->d3d12) {
         ULONG refs = ID3D12Device_Release(device->d3d12);
         INFO("%s: released vkd3d device, refs=%lu", __FUNCTION__, refs);

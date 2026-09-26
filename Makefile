@@ -29,7 +29,9 @@ VKD3D_LIBS=$(addprefix $(VKD3D_BUILD)/,libs/vkd3d/libvkd3d-proton.a libs/vkd3d-s
            subprojects/dxil-spirv/libdxbc_spv_module.a subprojects/dxil-spirv/subprojects/dxbc-spirv/libdxbc_spv.a)
 
 UMD_NAME := dx12um_virtio
-OBJS=$(addprefix $(BUILD_DIR)/,d3d12_adapter.o d3d12_caps.o d3d12_device.o d3d12_objects.o ddi_stubs.o d3d12_vkd3d_glue.o vk_bootstrap.o)
+OBJS=$(addprefix $(BUILD_DIR)/,d3d12_adapter.o d3d12_caps.o d3d12_device.o d3d12_objects.o d3d12_resource.o \
+     d3d12_descriptor.o d3d12_pipeline.o d3d12_cmdlist.o d3d12_queue.o ddi_stubs.o d3d12_vkd3d_glue.o \
+     d3d12_kmt_trace.o vk_bootstrap.o)
 
 .DEFAULT_GOAL := $(BUILD_DIR)/dist/$(UMD_NAME).dll
 

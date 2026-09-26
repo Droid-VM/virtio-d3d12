@@ -51,8 +51,8 @@ bool d3d12_umd_log_enabled(void);
 
 /* Registry switches, from the adapter's software key (INF HKR). */
 enum {
-    /* D3D12Enable: 0 = refuse OpenAdapter12 (the runtime then behaves exactly
-     * as with no D3D12 UMD), 1 = every process but dwm.exe, 2 = dwm.exe too. */
+    /* D3D12Enable: 0 = refuse OpenAdapter12, 1 = every process but dwm.exe,
+     * 2 = dwm.exe too. Missing registry values default to applications on. */
     D3D12_UMD_ENABLE_OFF = 0,
     D3D12_UMD_ENABLE_APPS = 1,
     D3D12_UMD_ENABLE_ALL = 2,
@@ -82,31 +82,80 @@ typedef struct {
     VkD3DDDICallbacks callbacks;
 
     ID3D12Device *d3d12;
+    ID3D12Device2 *d3d12_2; /* CreatePipelineState: pipeline streams */
+    ID3D12Device4 *d3d12_4; /* CreateCommandList1: lists that start closed */
     UINT descriptor_size[D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES];
 } D3D12_UMD_Device;
 
 static inline D3D12_UMD_Device *umd_device(D3D12DDI_HDEVICE h) { return h.pDrvPrivate; }
 static inline D3D12_UMD_Adapter *umd_adapter(D3D12DDI_HADAPTER h) { return h.pDrvPrivate; }
 
-/* Objects the runtime creates before the command path exists (its own
- * internal pipelines during D3D12CreateDevice). P1 keeps their descriptions;
- * P2 turns them into vkd3d objects. */
+/* A failed VOID DDI reports here; the runtime removes the device. */
+void d3d12_umd_set_error(D3D12_UMD_Device *device, HRESULT hr);
+
+/* ---------------------------------------------------------------------------
+ * Driver objects. Each lives in the private memory the runtime sizes with the
+ * matching CalcPrivate*Size, and wraps the vkd3d object the DDI forwards to.
+ */
+
+typedef struct D3D12_UMD_Heap D3D12_UMD_Heap;
+
 typedef struct {
-    UINT *code;             /* [program token][length in DWORDs][DXIL ...] */
-    SIZE_T code_dwords;
-    D3D12DDI_HROOTSIGNATURE root_signature;
+    ID3D12Resource *res;
+    D3D12_RESOURCE_DESC desc;
+    /* The heap a buffer or placed resource lives in, and where: placed
+     * resources name a buffer of that heap as their parent. NULL for
+     * committed textures. */
+    D3D12_UMD_Heap *heap;
+    UINT64 heap_offset;
+} D3D12_UMD_Resource;
+
+struct D3D12_UMD_Heap {
+    ID3D12Heap *heap;
+    D3D12_HEAP_DESC desc;
+    /* A buffer over the whole heap from offset 0 (the runtime creates one with
+     * every heap), used for MapHeap. */
+    ID3D12Resource *span;
+    /* Committed textures have no ID3D12Heap. */
+    ID3D12Resource *committed;
+};
+
+typedef struct {
+    ID3D12DescriptorHeap *heap;
+    D3D12DDI_CPU_DESCRIPTOR_HANDLE cpu;
+    D3D12DDI_GPU_DESCRIPTOR_HANDLE gpu;
+} D3D12_UMD_DescriptorHeap;
+
+typedef struct {
+    ID3D12QueryHeap *heap;
+} D3D12_UMD_QueryHeap;
+
+typedef struct {
+    ID3D12CommandSignature *sig;
+} D3D12_UMD_CommandSignature;
+
+typedef struct {
+    ID3D12RootSignature *rs;
+} D3D12_UMD_RootSignature;
+
+/* The runtime hands each create the DXIL program part ([program token]
+ * [length in DWORDs][DXIL ...]) and the stage's IO signatures by register;
+ * vkd3d wants a DXBC container, so one is built at create time. */
+typedef struct {
+    UINT program_type; /* D3D10_SB_TOKENIZED_PROGRAM_TYPE: 0 PS, 1 VS, 2 GS, 3 HS, 4 DS, 5 CS */
+    void *dxbc;
+    SIZE_T dxbc_size;
+    /* Stream output, when created through CreateGeometryShaderWithStreamOutput.
+     * The shader may be the last pre-rasterization stage rather than a GS. */
+    D3D12_SO_DECLARATION_ENTRY *so_entries;
+    UINT so_count;
+    UINT so_strides[D3D12_SO_BUFFER_SLOT_COUNT];
+    UINT so_num_strides;
+    UINT so_rasterized_stream;
 } D3D12_UMD_Shader;
 
 typedef struct {
-    D3D12DDI_ROOT_SIGNATURE_VERSION version;
-    UINT num_parameters;
-    UINT num_static_samplers;
-    D3D12DDI_ROOT_SIGNATURE_FLAGS flags;
-} D3D12_UMD_RootSignature;
-
-typedef struct {
-    D3D12DDIARG_CREATE_PIPELINE_STATE_0033 desc;
-    bool compute;
+    ID3D12PipelineState *pso;
 } D3D12_UMD_PipelineState;
 
 typedef struct {
@@ -126,17 +175,47 @@ typedef struct {
     D3D12DDIARG_INPUT_ELEMENT_DESC *elements;
 } D3D12_UMD_ElementLayout;
 
+/* A DDI pool has no list type but a vkd3d allocator does, so a pool holds one
+ * allocator per type, created on first use. */
+enum { D3D12_UMD_LIST_TYPES = 4 }; /* DIRECT, BUNDLE, COMPUTE, COPY */
+
 typedef struct {
-    D3D12DDI_COMMAND_POOL_FLAGS flags;
+    D3D12_UMD_Device *device;
+    ID3D12CommandAllocator *allocators[D3D12_UMD_LIST_TYPES];
 } D3D12_UMD_CommandPool;
 
 typedef struct {
     D3D12DDI_COMMAND_QUEUE_FLAGS queue_flags;
-    D3D12DDI_HCOMMANDPOOL_0040 pool;
+    D3D12_UMD_CommandPool *pool;
 } D3D12_UMD_CommandRecorder;
+
+typedef struct {
+    D3D12_UMD_Device *device;
+    D3D12DDI_HRTCOMMANDLIST hRT;
+    ID3D12GraphicsCommandList2 *cl;
+    D3D12_COMMAND_LIST_TYPE type;
+} D3D12_UMD_CommandList;
+
+typedef struct {
+    D3D12DDI_FENCE fence;
+} D3D12_UMD_Fence;
+
+static inline D3D12_UMD_Resource *umd_resource(D3D12DDI_HRESOURCE h) { return h.pDrvPrivate; }
+static inline ID3D12Resource *umd_res(D3D12DDI_HRESOURCE h) {
+    D3D12_UMD_Resource *r = h.pDrvPrivate;
+    return r ? r->res : NULL;
+}
+static inline D3D12_UMD_CommandList *umd_cl(D3D12DDI_HCOMMANDLIST h) { return h.pDrvPrivate; }
+static inline ID3D12RootSignature *umd_root_signature(D3D12DDI_HROOTSIGNATURE h) {
+    D3D12_UMD_RootSignature *rs = h.pDrvPrivate;
+    return rs ? rs->rs : NULL;
+}
 
 /* d3d12_adapter.c */
 bool d3d12_umd_is_dwm(void);
+
+/* d3d12_kmt_trace.c */
+void d3d12_umd_kmt_trace_init(void);
 
 /* d3d12_caps.c */
 HRESULT APIENTRY d3d12_umd_get_caps(D3D12DDI_HADAPTER hAdapter, const D3D12DDIARG_GETCAPS *pArgs);
@@ -147,11 +226,23 @@ SIZE_T APIENTRY d3d12_umd_calc_private_device_size(D3D12DDI_HADAPTER hAdapter, c
 HRESULT APIENTRY d3d12_umd_create_device(D3D12DDI_HADAPTER hAdapter, const D3D12DDIARG_CREATEDEVICE_0003 *pArgs);
 void APIENTRY d3d12_umd_destroy_device(D3D12DDI_HDEVICE hDevice);
 
-/* d3d12_tables.c */
+/* d3d12_objects.c: table assembly */
 void d3d12_umd_fill_core(D3D12DDI_DEVICE_FUNCS_CORE_0040 *t);
 void d3d12_umd_fill_command_list(D3D12DDI_COMMAND_LIST_FUNCS_3D_0040 *t);
 void d3d12_umd_fill_command_queue(D3D12DDI_COMMAND_QUEUE_FUNCS_CORE_0001 *t);
 void d3d12_umd_fill_extended_features(D3D12DDI_EXTENDED_FEATURES_FUNCS_0021 *t);
+
+/* Installers: each overwrites the slots its file implements. */
+void d3d12_umd_install_queue_core(D3D12DDI_DEVICE_FUNCS_CORE_0040 *t);
+void d3d12_umd_install_queue(D3D12DDI_COMMAND_QUEUE_FUNCS_CORE_0001 *t);
+void d3d12_umd_install_cmdlist_core(D3D12DDI_DEVICE_FUNCS_CORE_0040 *t);
+void d3d12_umd_install_cmdlist(D3D12DDI_COMMAND_LIST_FUNCS_3D_0040 *t);
+void d3d12_umd_install_resource_core(D3D12DDI_DEVICE_FUNCS_CORE_0040 *t);
+void d3d12_umd_install_descriptor_core(D3D12DDI_DEVICE_FUNCS_CORE_0040 *t);
+void d3d12_umd_install_pipeline_core(D3D12DDI_DEVICE_FUNCS_CORE_0040 *t);
+
+/* d3d12_resource.c */
+void d3d12_umd_resource_desc(const D3D12DDIARG_CREATERESOURCE_0003 *args, D3D12_RESOURCE_DESC *desc);
 
 /* ddi_stubs.c (generated by gen_ddi_stubs.py) */
 void d3d12_umd_stub_hit(const char *table, unsigned slot, const char *name, volatile LONG *hits);

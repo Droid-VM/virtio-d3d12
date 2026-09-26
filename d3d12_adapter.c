@@ -283,11 +283,13 @@ __attribute__((visibility("default"))) HRESULT APIENTRY OpenAdapter12(D3D12DDIAR
     /* The switch is read before anything else is touched: while it is off the
      * runtime must see exactly what it saw before this DLL existed. dwm.exe
      * calls OpenAdapter12 too, so it needs its own opt-in. */
-    DWORD enable = adapter_dword(callbacks, hRTAdapter, NULL, L"D3D12Enable", D3D12_UMD_ENABLE_OFF);
+    DWORD enable = adapter_dword(callbacks, hRTAdapter, NULL, L"D3D12Enable", D3D12_UMD_ENABLE_APPS);
     bool dwm = d3d12_umd_is_dwm();
     INFO("%s: D3D12Enable=%lu dwm=%d", __FUNCTION__, enable, dwm);
     if (enable == D3D12_UMD_ENABLE_OFF || (enable == D3D12_UMD_ENABLE_APPS && dwm))
         return DXGI_ERROR_UNSUPPORTED;
+
+    d3d12_umd_kmt_trace_init();
 
     VIRTIO_WDDM_AdapterCaps caps;
     HRESULT hr = virtio_wddm_query_adapter(callbacks, hRTAdapter, &caps);
