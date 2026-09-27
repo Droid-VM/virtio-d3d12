@@ -318,6 +318,9 @@ static void allocation_info(D3D12_UMD_Device *device, const D3D12_RESOURCE_DESC 
     /* A buffer has a known layout: the runtime checks its size is the width. */
     out->ResourceDataSize = info.SizeInBytes == UINT64_MAX ? UINT64_MAX : (buffer ? desc->Width : info.SizeInBytes);
     out->ResourceDataAlignment = (UINT32)info.Alignment;
+    /* Zero is invalid for these DDI alignments even when no extra data is used. */
+    out->AdditionalDataHeaderAlignment = 1;
+    out->AdditionalDataAlignment = 1;
     out->Layout = buffer ? D3D12DDI_TL_ROW_MAJOR : layout;
     if (d3d12_umd_log_enabled())
         INFO("allocation info: dim %d %llux%ux%u fmt %u flags 0x%x align 0x%x -> size 0x%llx align 0x%llx",
