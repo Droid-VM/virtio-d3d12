@@ -296,6 +296,14 @@ static void APIENTRY destroy_heap_and_resource(D3D12DDI_HDEVICE hDevice, D3D12DD
     }
 }
 
+/* win3d UMD bridge into the statically linked vkd3d (VKD3D_BUILD_UMD exports
+ * in vkd3d-proton/libs/vkd3d/resource.c): the runtime's WriteToSubresource /
+ * ReadFromSubresource and CPU-visible heap mapping are built on exactly the
+ * host pointer and subresource layout that the inner implementation uses. */
+extern HRESULT vkd3d_acquire_resource_cpu_pointer(ID3D12Resource *resource, void **data);
+extern HRESULT vkd3d_get_resource_subresource_layout(ID3D12Resource *resource, UINT subresource,
+        UINT64 *offset, UINT64 *row_pitch, UINT64 *depth_pitch);
+
 /* The runtime adds the offset of what it maps; the heap maps from its start. */
 static HRESULT APIENTRY map_heap(D3D12DDI_HDEVICE hDevice, D3D12DDI_HHEAP hHeap, void **data) {
     D3D12_UMD_Device *device = umd_device(hDevice);
@@ -325,8 +333,20 @@ static HRESULT APIENTRY map_heap(D3D12DDI_HDEVICE hDevice, D3D12DDI_HHEAP hHeap,
      * removed; leave the address undisclosed and let the API layer return its
      * expected Map result instead. */
     if (heap->committed && !heap->span) {
-        if (d3d12_umd_log_enabled())
-            INFO("map heap %p committed texture: no linear CPU address", heap);
+        /* A texture on a CPU-visible heap is host memory laid out exactly as
+         * the inner vkd3d sees it; hand the runtime that pointer so its
+         * Map/WriteToSubresource/ReadFromSubresource actually reach the GPU
+         * resource. GPU-only heaps keep the address undisclosed. */
+        HRESULT hr2 = vkd3d_acquire_resource_cpu_pointer(heap->committed, data);
+        if (SUCCEEDED(hr2)) {
+            /* A NULL inner Map is legal for textures and invalidates the GPU
+             * range; UnmapHeap later flushes what the runtime wrote. */
+            ID3D12Resource_Map(heap->committed, 0, NULL, NULL);
+            if (d3d12_umd_log_enabled())
+                INFO("map heap %p committed texture: cpu ptr %p", heap, *data);
+            return S_OK;
+        }
+        *data = NULL;
         return S_OK;
     }
     ID3D12Resource *res = heap->span ? heap->span : heap->committed;
@@ -407,10 +427,13 @@ static void APIENTRY check_subresource_info(D3D12DDI_HDEVICE hDevice, D3D12DDI_H
     (void)hDevice;
     D3D12_UMD_Resource *resource = umd_resource(hResource);
     memset(out, 0, sizeof(*out));
-    /* Only buffers have a CPU-visible layout here; textures are optimally tiled. */
     if (resource->desc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER) {
         out->RowStride = resource->desc.Width;
         out->DepthStride = resource->desc.Width;
+    } else if (SUCCEEDED(vkd3d_get_resource_subresource_layout(umd_res(hResource), subresource,
+                    &out->Offset, &out->RowStride, &out->DepthStride))) {
+        /* The inner layout of a host-visible texture: this is what the
+         * runtime must use to address the pointer MapHeap returned. */
     } else {
         WARN("%s: texture %p subresource %u has no linear layout", __FUNCTION__, resource, subresource);
     }

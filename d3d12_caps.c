@@ -151,7 +151,11 @@ static HRESULT get_caps(const D3D12_UMD_Adapter *adapter, const D3D12DDIARG_GETC
     case D3D12DDICAPS_TYPE_TEXTURE_LAYOUT1:
     case D3D12DDICAPS_TYPE_0022_TEXTURE_LAYOUT: {
         /* No device-dependent layouts, no standard swizzle, no row-major
-         * textures: the layout is chosen by turnip and the host. */
+         * textures: the layout is chosen by turnip and the host. Both
+         * Supports64KStandardSwizzle and SupportsRowMajorTexture were tried
+         * to open the runtime's Map(NULL) path for CPU-visible textures -
+         * Map(NULL) stayed at E_OUTOFMEMORY and probes deadlocked on this
+         * adapter, so both stay off until the real gate is found. */
         if (args->pInfo)
             return E_INVALIDARG;
         D3D12DDI_TEXTURE_LAYOUT_CAPS_0026 t = { 0 };
