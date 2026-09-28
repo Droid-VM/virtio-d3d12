@@ -203,7 +203,7 @@ static HRESULT APIENTRY d3d12_umd_close_adapter(D3D12DDI_HADAPTER hAdapter) {
 static HRESULT APIENTRY d3d12_umd_get_supported_versions(D3D12DDI_HADAPTER hAdapter, UINT32 *puEntries,
                                                         UINT64 *pSupportedDDIInterfaceVersions) {
     (void)hAdapter;
-    static const UINT64 versions[] = { D3D12DDI_SUPPORTED_0040 };
+    static const UINT64 versions[] = { D3D12DDI_SUPPORTED_0041 };
 
     /* Count first (NULL array), then fill. */
     if (pSupportedDDIInterfaceVersions) {

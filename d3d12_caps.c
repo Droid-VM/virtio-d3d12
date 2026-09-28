@@ -37,6 +37,9 @@ static void options(const D3D12_UMD_Adapter *adapter, D3D12DDI_D3D12_OPTIONS_DAT
     o->OutputMergerLogicOp = TRUE;
     o->ResourceHeapTier = D3D12DDI_RESOURCE_HEAP_TIER_2;
     o->DepthBoundsTestSupported = TRUE;
+    /* DDI 0041 exposes this field; it allows the runtime's 64 KiB-aligned
+     * MSAA placement workaround used by vkd3d-proton's tests. */
+    o->ReservedBufferPlacementSupported = TRUE;
     o->ProgrammableSamplePositionsTier = D3D12DDI_PROGRAMMABLE_SAMPLE_POSITIONS_TIER_NOT_SUPPORTED;
     o->WriteBufferImmediateQueueFlags = D3D12DDI_COMMAND_QUEUE_FLAG_3D | D3D12DDI_COMMAND_QUEUE_FLAG_COMPUTE |
                                         D3D12DDI_COMMAND_QUEUE_FLAG_COPY;
