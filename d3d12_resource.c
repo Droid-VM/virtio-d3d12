@@ -5,6 +5,11 @@
 #define D3D12_RESOURCE_FLAG_USE_TIGHT_ALIGNMENT ((D3D12_RESOURCE_FLAGS)0x400)
 #endif
 
+/* The WDK used for this UMD predates GPU upload heaps. */
+#ifndef D3D12_HEAP_TYPE_GPU_UPLOAD
+#define D3D12_HEAP_TYPE_GPU_UPLOAD ((D3D12_HEAP_TYPE)5)
+#endif
+
 /* ---------------------------------------------------------------------------
  * Heaps and resources (dx12plan.md §2.3 / §2.5).
  *
@@ -67,8 +72,14 @@ void d3d12_umd_resource_desc(const D3D12DDIARG_CREATERESOURCE_0003 *args, D3D12_
  * architecture; memory pool and page property sit one below the API's. The
  * adapter is UMA, where vkd3d refuses L1. */
 static D3D12_HEAP_PROPERTIES heap_properties(const D3D12DDIARG_CREATEHEAP_0001 *args) {
+    /* The runtime represents GPU_UPLOAD heaps as coherent system-wide DDI
+     * heaps. Preserve the non-custom heap type so vkd3d can select its
+     * staging-copy path for CPU-visible textures, including depth images. */
+    D3D12_HEAP_TYPE type = (args->Flags & D3D12DDI_HEAP_FLAG_COHERENT_SYSTEMWIDE)
+            ? D3D12_HEAP_TYPE_GPU_UPLOAD : D3D12_HEAP_TYPE_CUSTOM;
+
     return (D3D12_HEAP_PROPERTIES) {
-        .Type = D3D12_HEAP_TYPE_CUSTOM,
+        .Type = type,
         .CPUPageProperty = (D3D12_CPU_PAGE_PROPERTY)(args->CPUPageProperty + 1),
         .MemoryPoolPreference = (D3D12_MEMORY_POOL)(args->MemoryPool + 1),
     };
