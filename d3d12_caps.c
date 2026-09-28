@@ -47,7 +47,8 @@ static void options(const D3D12_UMD_Adapter *adapter, D3D12DDI_D3D12_OPTIONS_DAT
 
 static void shader_caps(const D3D12_UMD_Adapter *adapter, D3D12DDI_SHADER_CAPS_0084 *s) {
     memset(s, 0, sizeof(*s));
-    s->MinPrecision = D3D12DDI_SHADER_MIN_PRECISION_NONE;
+    /* The backend supports min16float lowering even without native FP16 ops. */
+    s->MinPrecision = D3D12DDI_SHADER_MIN_PRECISION_16_BIT;
     s->TypedUAVLoadAdditionalFormats = fl12(adapter);
     s->WaveOps = TRUE;
     s->WaveLaneCountMin = 64;
@@ -106,6 +107,8 @@ static HRESULT get_caps(const D3D12_UMD_Adapter *adapter, const D3D12DDIARG_GETC
         static const D3D12DDI_SHADER_MODEL models[] = {
             D3D12DDI_SHADER_MODEL_5_1_RELEASE_0011,
             D3D12DDI_SHADER_MODEL_6_0_RELEASE_0011,
+            D3D12DDI_SHADER_MODEL_6_1_RELEASE_0033,
+            D3D12DDI_SHADER_MODEL_6_2_RELEASE_0042,
         };
         if (args->DataSize < sizeof(D3D12DDI_D3D12_SHADER_MODELS_DATA_0011))
             return E_INVALIDARG;
