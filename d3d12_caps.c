@@ -40,7 +40,12 @@ static void options(const D3D12_UMD_Adapter *adapter, D3D12DDI_D3D12_OPTIONS_DAT
     /* DDI 0041 exposes this field; it allows the runtime's 64 KiB-aligned
      * MSAA placement workaround used by vkd3d-proton's tests. */
     o->ReservedBufferPlacementSupported = TRUE;
-    o->ProgrammableSamplePositionsTier = D3D12DDI_PROGRAMMABLE_SAMPLE_POSITIONS_TIER_NOT_SUPPORTED;
+    /* Tier 1 unlocks the runtime rule "MSAA resources may be created in
+     * RESOLVE_DEST only with programmable-MSAA tier 1" (the exact message
+     * lives in D3D12Core.dll). Sample positions themselves are forwarded to
+     * vkd3d's SetSamplePositions, which is a FIXME stub: programming them
+     * for real needs VK_EXT_sample_locations in the inner device. */
+    o->ProgrammableSamplePositionsTier = D3D12DDI_PROGRAMMABLE_SAMPLE_POSITIONS_TIER_1;
     o->WriteBufferImmediateQueueFlags = D3D12DDI_COMMAND_QUEUE_FLAG_3D | D3D12DDI_COMMAND_QUEUE_FLAG_COMPUTE |
                                         D3D12DDI_COMMAND_QUEUE_FLAG_COPY;
     /* Barycentrics and view instancing need SM 6.1; render passes are not a
