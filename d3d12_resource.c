@@ -70,21 +70,33 @@ static D3D12_HEAP_PROPERTIES heap_properties(const D3D12DDIARG_CREATEHEAP_0001 *
     return (D3D12_HEAP_PROPERTIES) {
         .Type = D3D12_HEAP_TYPE_CUSTOM,
         .CPUPageProperty = (D3D12_CPU_PAGE_PROPERTY)(args->CPUPageProperty + 1),
-        .MemoryPoolPreference = D3D12_MEMORY_POOL_L0,
+        .MemoryPoolPreference = (D3D12_MEMORY_POOL)(args->MemoryPool + 1),
     };
 }
 
 static D3D12_HEAP_DESC heap_desc(const D3D12DDIARG_CREATEHEAP_0001 *args) {
-    /* Resource heap tier 2: any heap holds any resource. The runtime has
-     * validated placement against the API heap flags already, and the span
-     * buffer needs buffers allowed. */
+    D3D12_HEAP_FLAGS flags = D3D12_HEAP_FLAG_NONE;
+
+    /* DDI flags name the resource classes that are allowed. The API flags
+     * name the classes that are denied, so only translate the single-class
+     * cases; the common all-classes case is D3D12_HEAP_FLAG_NONE. */
+    if ((args->Flags & D3D12DDI_HEAP_FLAG_BUFFERS) &&
+            !(args->Flags & (D3D12DDI_HEAP_FLAG_NON_RT_DS_TEXTURES | D3D12DDI_HEAP_FLAG_RT_DS_TEXTURES)))
+        flags = D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
+    else if ((args->Flags & D3D12DDI_HEAP_FLAG_NON_RT_DS_TEXTURES) &&
+            !(args->Flags & (D3D12DDI_HEAP_FLAG_BUFFERS | D3D12DDI_HEAP_FLAG_RT_DS_TEXTURES)))
+        flags = D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES;
+    else if ((args->Flags & D3D12DDI_HEAP_FLAG_RT_DS_TEXTURES) &&
+            !(args->Flags & (D3D12DDI_HEAP_FLAG_BUFFERS | D3D12DDI_HEAP_FLAG_NON_RT_DS_TEXTURES)))
+        flags = D3D12_HEAP_FLAG_ALLOW_ONLY_RT_DS_TEXTURES;
+
     return (D3D12_HEAP_DESC) {
         .SizeInBytes = args->ByteSize,
         .Properties = heap_properties(args),
         .Alignment = args->Alignment > D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT
                          ? D3D12_DEFAULT_MSAA_RESOURCE_PLACEMENT_ALIGNMENT
                          : D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT,
-        .Flags = D3D12_HEAP_FLAG_NONE,
+        .Flags = flags,
     };
 }
 
@@ -309,14 +321,29 @@ static void APIENTRY unmap_heap(D3D12DDI_HDEVICE hDevice, D3D12DDI_HHEAP hHeap) 
 
 static void allocation_info(D3D12_UMD_Device *device, const D3D12_RESOURCE_DESC *desc, UINT32 alignment,
                             D3D12DDI_TEXTURE_LAYOUT layout, D3D12DDI_RESOURCE_ALLOCATION_INFO_0022 *out) {
+    memset(out, 0, sizeof(*out));
+    bool buffer = desc->Dimension == D3D12_RESOURCE_DIMENSION_BUFFER;
+
+    /* D3D12 buffer resources have a fixed 64 KiB placement alignment. The
+     * runtime may pass the containing heap's 4 MiB alignment here; forwarding
+     * that value makes vkd3d reject the otherwise valid buffer query with
+     * UINT64_MAX. */
+    if (buffer) {
+        UINT32 buffer_alignment = alignment > D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT
+                ? D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT : alignment;
+        out->ResourceDataSize = desc->Width;
+        out->ResourceDataAlignment = buffer_alignment ? buffer_alignment : D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+        out->AdditionalDataHeaderAlignment = 1;
+        out->AdditionalDataAlignment = 1;
+        out->Layout = D3D12DDI_TL_ROW_MAJOR;
+        return;
+    }
+
     D3D12_RESOURCE_DESC d = *desc;
     d.Alignment = alignment;
     D3D12_RESOURCE_ALLOCATION_INFO info = ID3D12Device_GetResourceAllocationInfo(device->d3d12, 0, 1, &d);
 
-    memset(out, 0, sizeof(*out));
-    bool buffer = desc->Dimension == D3D12_RESOURCE_DIMENSION_BUFFER;
-    /* A buffer has a known layout: the runtime checks its size is the width. */
-    out->ResourceDataSize = info.SizeInBytes == UINT64_MAX ? UINT64_MAX : (buffer ? desc->Width : info.SizeInBytes);
+    out->ResourceDataSize = info.SizeInBytes;
     out->ResourceDataAlignment = (UINT32)info.Alignment;
     /* Zero is invalid for these DDI alignments even when no extra data is used. */
     out->AdditionalDataHeaderAlignment = 1;
