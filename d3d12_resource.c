@@ -215,6 +215,26 @@ static HRESULT APIENTRY create_heap_and_resource(D3D12DDI_HDEVICE hDevice, const
         if (parent && parent->heap && parent->heap->heap) {
             resource->heap = parent->heap;
             resource->heap_offset = parent->heap_offset + at->Offset;
+            /* The DDI description omits the API Alignment member. Recover
+             * small alignment for offsets below the default, but only when
+             * vkd3d confirms that this texture supports it. */
+            if (desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER &&
+                    !(desc.Flags & D3D12_RESOURCE_FLAG_USE_TIGHT_ALIGNMENT)) {
+                UINT64 default_alignment = desc.SampleDesc.Count > 1
+                        ? D3D12_DEFAULT_MSAA_RESOURCE_PLACEMENT_ALIGNMENT
+                        : D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+                if (resource->heap_offset & (default_alignment - 1)) {
+                    D3D12_RESOURCE_DESC small = desc;
+                    small.Alignment = desc.SampleDesc.Count > 1
+                            ? D3D12_SMALL_MSAA_RESOURCE_PLACEMENT_ALIGNMENT
+                            : D3D12_SMALL_RESOURCE_PLACEMENT_ALIGNMENT;
+                    D3D12_RESOURCE_ALLOCATION_INFO info =
+                            ID3D12Device_GetResourceAllocationInfo(device->d3d12, 0, 1, &small);
+                    if (info.SizeInBytes != UINT64_MAX && info.Alignment == small.Alignment &&
+                            !(resource->heap_offset & (info.Alignment - 1)))
+                        desc.Alignment = small.Alignment;
+                }
+            }
             hr = ID3D12Device_CreatePlacedResource(device->d3d12, resource->heap->heap, resource->heap_offset, &desc,
                                                    state, clear_value(&desc, clear), &IID_ID3D12Resource,
                                                    (void **)&resource->res);
