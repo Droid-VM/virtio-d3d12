@@ -441,6 +441,81 @@ static void APIENTRY destroy_root_signature(D3D12DDI_HDEVICE hDevice, D3D12DDI_H
  * to hand vkd3d the depth-bounds enable.
  */
 
+/* The runtime owns application names and supplies stable numeric indices.
+ * Retain initial data: the underlying library may reference its blob until
+ * destruction, while the DDI input only lives through this callback. */
+typedef struct {
+    ID3D12PipelineLibrary1 *library;
+    void *initial_data;
+} pipeline_library;
+
+static void pipeline_name(UINT index, WCHAR name[9]) {
+    static const WCHAR digits[] = L"0123456789abcdef";
+    for (UINT i = 0; i < 8; i++)
+        name[i] = digits[(index >> (28 - 4 * i)) & 15];
+    name[8] = 0;
+}
+
+static SIZE_T APIENTRY calc_pipeline_library_size(D3D12DDI_HDEVICE device,
+        const D3D12DDIARG_CREATE_PIPELINE_LIBRARY_0010 *args) {
+    (void)device;
+    (void)args;
+    return sizeof(pipeline_library);
+}
+
+static HRESULT APIENTRY create_pipeline_library(D3D12DDI_HDEVICE device,
+        const D3D12DDIARG_CREATE_PIPELINE_LIBRARY_0010 *args, D3D12DDI_HPIPELINELIBRARY handle) {
+    pipeline_library *lib = handle.pDrvPrivate;
+    memset(lib, 0, sizeof(*lib));
+    if (args->InitialDataSize) {
+        if (!args->pInitialData)
+            return E_INVALIDARG;
+        lib->initial_data = malloc(args->InitialDataSize);
+        if (!lib->initial_data)
+            return E_OUTOFMEMORY;
+        memcpy(lib->initial_data, args->pInitialData, args->InitialDataSize);
+    }
+    HRESULT hr = ID3D12Device2_CreatePipelineLibrary(umd_device(device)->d3d12_2,
+            lib->initial_data, args->InitialDataSize, &IID_ID3D12PipelineLibrary1, (void **)&lib->library);
+    if (FAILED(hr)) {
+        free(lib->initial_data);
+        lib->initial_data = NULL;
+    }
+    return hr;
+}
+
+static void APIENTRY destroy_pipeline_library(D3D12DDI_HDEVICE device, D3D12DDI_HPIPELINELIBRARY handle) {
+    (void)device;
+    pipeline_library *lib = handle.pDrvPrivate;
+    if (lib->library)
+        ID3D12PipelineLibrary1_Release(lib->library);
+    free(lib->initial_data);
+    memset(lib, 0, sizeof(*lib));
+}
+
+static HRESULT APIENTRY add_pipeline_to_library(D3D12DDI_HDEVICE device, D3D12DDI_HPIPELINELIBRARY handle,
+        D3D12DDI_HPIPELINESTATE state, UINT index) {
+    (void)device;
+    pipeline_library *lib = handle.pDrvPrivate;
+    D3D12_UMD_PipelineState *pso = state.pDrvPrivate;
+    WCHAR name[9];
+    pipeline_name(index, name);
+    return ID3D12PipelineLibrary1_StorePipeline(lib->library, name, pso->pso);
+}
+
+static SIZE_T APIENTRY calc_serialized_library_size(D3D12DDI_HDEVICE device, D3D12DDI_HPIPELINELIBRARY handle) {
+    (void)device;
+    pipeline_library *lib = handle.pDrvPrivate;
+    return ID3D12PipelineLibrary1_GetSerializedSize(lib->library);
+}
+
+static HRESULT APIENTRY serialize_library(D3D12DDI_HDEVICE device, D3D12DDI_HPIPELINELIBRARY handle, void *data) {
+    (void)device;
+    pipeline_library *lib = handle.pDrvPrivate;
+    return ID3D12PipelineLibrary1_Serialize(lib->library, data,
+            ID3D12PipelineLibrary1_GetSerializedSize(lib->library));
+}
+
 #define SUBOBJECT(T) struct { alignas(void *) D3D12_PIPELINE_STATE_SUBOBJECT_TYPE type; T data; }
 
 typedef struct {
@@ -606,7 +681,15 @@ static HRESULT create_graphics_pipeline(D3D12_UMD_Device *device, const D3D12DDI
     s.sample_desc.data = args->SampleDesc;
 
     D3D12_PIPELINE_STATE_STREAM_DESC desc = { sizeof(s), &s };
-    HRESULT hr = ID3D12Device2_CreatePipelineState(device->d3d12_2, &desc, &IID_ID3D12PipelineState, (void **)pso);
+    pipeline_library *lib = args->LibraryReference.hLibrary.pDrvPrivate;
+    HRESULT hr;
+    if (lib) {
+        WCHAR name[9];
+        pipeline_name(args->LibraryReference.PipelineIndex, name);
+        hr = ID3D12PipelineLibrary1_LoadPipeline(lib->library, name, &desc, &IID_ID3D12PipelineState, (void **)pso);
+    } else {
+        hr = ID3D12Device2_CreatePipelineState(device->d3d12_2, &desc, &IID_ID3D12PipelineState, (void **)pso);
+    }
     free(elements);
     return hr;
 }
@@ -631,7 +714,16 @@ static HRESULT APIENTRY create_pipeline_state(D3D12DDI_HDEVICE hDevice, const D3
             .pRootSignature = umd_root_signature(args->hRootSignature),
             .CS = bytecode(args->hComputeShader),
         };
-        hr = ID3D12Device_CreateComputePipelineState(device->d3d12, &desc, &IID_ID3D12PipelineState, (void **)&pso->pso);
+        pipeline_library *lib = args->LibraryReference.hLibrary.pDrvPrivate;
+        if (lib) {
+            WCHAR name[9];
+            pipeline_name(args->LibraryReference.PipelineIndex, name);
+            hr = ID3D12PipelineLibrary1_LoadComputePipeline(lib->library, name, &desc,
+                    &IID_ID3D12PipelineState, (void **)&pso->pso);
+        } else {
+            hr = ID3D12Device_CreateComputePipelineState(device->d3d12, &desc,
+                    &IID_ID3D12PipelineState, (void **)&pso->pso);
+        }
     } else {
         hr = create_graphics_pipeline(device, args, &pso->pso);
     }
@@ -682,4 +774,10 @@ void d3d12_umd_install_pipeline_core(D3D12DDI_DEVICE_FUNCS_CORE_0040 *t) {
     t->pfnCalcPrivatePipelineStateSize = calc_pipeline_state_size;
     t->pfnCreatePipelineState = create_pipeline_state;
     t->pfnDestroyPipelineState = destroy_pipeline_state;
+    t->pfnCalcPrivatePipelineLibrarySize = calc_pipeline_library_size;
+    t->pfnCreatePipelineLibrary = create_pipeline_library;
+    t->pfnDestroyPipelineLibrary = destroy_pipeline_library;
+    t->pfnAddPipelineStateToLibrary = add_pipeline_to_library;
+    t->pfnCalcSerializedLibrarySize = calc_serialized_library_size;
+    t->pfnSerializeLibrary = serialize_library;
 }
