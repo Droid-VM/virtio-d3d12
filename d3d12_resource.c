@@ -293,6 +293,17 @@ static void APIENTRY destroy_heap_and_resource(D3D12DDI_HDEVICE hDevice, D3D12DD
     D3D12_UMD_Device *device = umd_device(hDevice);
     D3D12_UMD_Resource *resource = hResource.pDrvPrivate;
     D3D12_UMD_Heap *heap = hHeap.pDrvPrivate;
+    if (heap && heap->sysmem_allocation) {
+        /* Release VidMm's reference to the pages before freeing their owner. */
+        D3D12DDICB_DEALLOCATE_0022 deallocate = { .hResource = heap->hRTResource };
+        HRESULT hr = device->um22->pfnDeallocateCb(device->hRTDevice, &deallocate);
+        if (FAILED(hr)) {
+            ERROR("sysmem deallocation failed: 0x%08lx", hr);
+            /* Keep the backing alive if the runtime still owns its pages. */
+            if (heap->committed)
+                ID3D12Resource_AddRef(heap->committed);
+        }
+    }
     if (resource) {
         if (resource->res)
             ID3D12Resource_Release(resource->res);
@@ -342,11 +353,17 @@ static void wrap_committed_host_memory(D3D12_UMD_Device *device, void *hRTResour
     }
     UINT64 size = (info.SizeInBytes + 0xfff) & ~(UINT64)0xfff;
     VIRTIO_WDDM_CreateResource resource = { .tag = VIRTIO_WDDM_CREATE_RESOURCE_TAG };
-    VIRTIO_WDDM_AllocateSysmem priv = {
+    /* KMD validates the common allocation envelope before dispatching on tag.
+     * Keep the sysmem payload at offset zero and zero the unused bytes. */
+    union {
+        VIRTIO_WDDM_CreateAllocation allocation;
+        VIRTIO_WDDM_AllocateSysmem sysmem;
+    } priv = {0};
+    priv.sysmem = (VIRTIO_WDDM_AllocateSysmem) {
         .tag = VIRTIO_WDDM_ALLOCATE_SYSMEM_TAG,
         .size = size,
     };
-    if (!device->um22 || !device->um22->pfnAllocateCb) {
+    if (!device->um22 || !device->um22->pfnAllocateCb || !device->um22->pfnDeallocateCb) {
         INFO("%s: no um22 AllocateCb, leaving unallocated", __FUNCTION__);
         return;
     }
@@ -368,9 +385,11 @@ static void wrap_committed_host_memory(D3D12_UMD_Device *device, void *hRTResour
     if (FAILED(hr) || !alloc.hAllocation)
         ERROR("%s: sysmem AllocateCb failed: 0x%08lx (host %p size 0x%llx)", __FUNCTION__, hr,
               host, (unsigned long long)size);
-    else
+    else {
+        heap->sysmem_allocation = alloc.hAllocation;
         INFO("%s: sysmem allocation 0x%lx over host %p size 0x%llx", __FUNCTION__,
              (unsigned long)alloc.hAllocation, host, (unsigned long long)size);
+    }
 }
 
 /* The runtime adds the offset of what it maps; the heap maps from its start. */

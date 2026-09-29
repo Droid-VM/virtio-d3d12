@@ -138,6 +138,7 @@ struct D3D12_UMD_Heap {
      * the runtime resource is fully built and its handle is live. */
     void *hRTResource;
     bool sysmem_wrapped;
+    D3DKMT_HANDLE sysmem_allocation;
 };
 
 typedef struct {
