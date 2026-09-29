@@ -41,6 +41,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL bridge_vkCreateInstance(const VkInstanceCr
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL bridge_vkGetInstanceProcAddr(VkInstance instance, const char *name) {
     if (!instance && !strcmp(name, "vkCreateInstance"))
         return (PFN_vkVoidFunction)bridge_vkCreateInstance;
+
     return loader_gipa(instance, name);
 }
 

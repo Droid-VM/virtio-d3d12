@@ -133,6 +133,11 @@ struct D3D12_UMD_Heap {
     ID3D12Resource *span;
     /* Committed textures have no ID3D12Heap. */
     ID3D12Resource *committed;
+    /* The runtime resource handle the committed texture belongs to, and
+     * whether its sysmem wrap was attempted: done lazily from MapHeap, when
+     * the runtime resource is fully built and its handle is live. */
+    void *hRTResource;
+    bool sysmem_wrapped;
 };
 
 typedef struct {

@@ -10,7 +10,6 @@ static __thread struct {
     D3DKMT_HANDLE allocation, resource;
 } last_alloc;
 static __thread void *primary_rt_resource;
-
 static int runtime_alloc(void *ctx, const VIRTIO_WDDM_RuntimeAllocRequest *req,
                          VIRTIO_WDDM_RuntimeAllocResult *out) {
     D3D12_UMD_Device *device = ctx;

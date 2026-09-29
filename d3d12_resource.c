@@ -152,6 +152,8 @@ static void log_create(const char *what, const D3D12DDIARG_CREATEHEAP_0001 *heap
         INFO("%s%s%s", what, heap_text, res_text);
 }
 
+static void wrap_committed_host_memory(D3D12_UMD_Device *device, void *hRTResource, D3D12_UMD_Heap *heap);
+
 static HRESULT create_heap_span(D3D12_UMD_Device *device, D3D12_UMD_Heap *heap, const D3D12DDIARG_CREATEHEAP_0001 *args,
                                 const D3D12_RESOURCE_DESC *desc, D3D12_RESOURCE_STATES state) {
     heap->desc = heap_desc(args);
@@ -171,6 +173,7 @@ static HRESULT create_heap_span(D3D12_UMD_Device *device, D3D12_UMD_Heap *heap, 
     return ID3D12Device_CreatePlacedResource(device->d3d12, heap->heap, 0, desc, state, NULL, &IID_ID3D12Resource,
                                              (void **)&heap->span);
 }
+
 
 static HRESULT APIENTRY create_heap_and_resource(D3D12DDI_HDEVICE hDevice, const D3D12DDIARG_CREATEHEAP_0001 *heap_args,
                                                  D3D12DDI_HHEAP hHeap, D3D12DDI_HRTRESOURCE hRTResource,
@@ -204,12 +207,23 @@ static HRESULT APIENTRY create_heap_and_resource(D3D12DDI_HDEVICE hDevice, const
     } else if (heap && resource && desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) {
         what = "committed texture";
         D3D12_HEAP_PROPERTIES props = heap_properties(heap_args);
+        /* CPU-visible heaps: route the inner resource's memory through the
+         * runtime allocator so it becomes a KMT allocation on this resource.
+         * The runtime refuses Map(NULL) - and quietly no-ops WriteToSubresource
+         * and ReadFromSubresource - without one, no matter what MapHeap
+         * returns. */
         hr = ID3D12Device_CreateCommittedResource(device->d3d12, &props, D3D12_HEAP_FLAG_NONE, &desc, state,
                                                   clear_value(&desc, clear), &IID_ID3D12Resource, (void **)&resource->res);
         if (SUCCEEDED(hr)) {
             heap->committed = resource->res;
             ID3D12Resource_AddRef(heap->committed);
             resource->heap = heap;
+            /* CPU-visible heaps get their host memory wrapped in a KMT
+             * allocation lazily, from the first MapHeap: the runtime rejects
+             * an AllocateCb on a resource handle it considers finished. */
+            heap->hRTResource = (heap_args->CPUPageProperty == D3D12DDI_CPU_PAGE_PROPERTY_WRITE_COMBINE ||
+                                 heap_args->CPUPageProperty == D3D12DDI_CPU_PAGE_PROPERTY_WRITE_BACK)
+                            ? hRTResource.handle : NULL;
         }
     } else if (heap) {
         what = resource ? "heap + buffer" : "heap";
@@ -304,6 +318,61 @@ extern HRESULT vkd3d_acquire_resource_cpu_pointer(ID3D12Resource *resource, void
 extern HRESULT vkd3d_get_resource_subresource_layout(ID3D12Resource *resource, UINT subresource,
         UINT64 *offset, UINT64 *row_pitch, UINT64 *depth_pitch);
 
+static void wrap_committed_host_memory(D3D12_UMD_Device *device, void *hRTResource, D3D12_UMD_Heap *heap) {
+    D3D12_RESOURCE_DESC desc_storage, *desc = &desc_storage;
+    *desc = ID3D12Resource_GetDesc(heap->committed);
+    /* Experimental and still capable of wedging the device stack when the
+     * allocation is rejected: opt-in only, so ordinary D3D12 use never
+     * touches the path while it is being brought up. */
+    char flag[2] = {0};
+    if (!(GetEnvironmentVariableA("VIRTIO_WDDM_SYSMEM_WRAP", flag, sizeof(flag)) == 1 && flag[0] == '1')) {
+        INFO("%s: wrap disabled", __FUNCTION__);
+        return;
+    }
+    void *host = NULL;
+    if (FAILED(vkd3d_acquire_resource_cpu_pointer(heap->committed, &host)) || !host ||
+            ((uintptr_t)host & 0xfff)) {
+        INFO("%s: no page-aligned host pointer (%p), leaving unallocated", __FUNCTION__, host);
+        return;
+    }
+    D3D12_RESOURCE_ALLOCATION_INFO info = ID3D12Device_GetResourceAllocationInfo(device->d3d12, 0, 1, desc);
+    if (info.SizeInBytes == UINT64_MAX || !info.SizeInBytes) {
+        INFO("%s: no allocation size, leaving unallocated", __FUNCTION__);
+        return;
+    }
+    UINT64 size = (info.SizeInBytes + 0xfff) & ~(UINT64)0xfff;
+    VIRTIO_WDDM_CreateResource resource = { .tag = VIRTIO_WDDM_CREATE_RESOURCE_TAG };
+    VIRTIO_WDDM_AllocateSysmem priv = {
+        .tag = VIRTIO_WDDM_ALLOCATE_SYSMEM_TAG,
+        .size = size,
+    };
+    if (!device->um22 || !device->um22->pfnAllocateCb) {
+        INFO("%s: no um22 AllocateCb, leaving unallocated", __FUNCTION__);
+        return;
+    }
+    D3D12DDI_ALLOCATION_INFO_0022 alloc = {
+        .pSystemMem = host,
+        .pPrivateDriverData = &priv,
+        .PrivateDriverDataSize = sizeof(priv),
+    };
+    D3D12DDICB_ALLOCATE_0022 allocate = {
+        .pPrivateDriverData = &resource,
+        .PrivateDriverDataSize = sizeof(resource),
+        .hResource = hRTResource,
+        .NumAllocations = 1,
+        .pAllocationInfo = &alloc,
+    };
+    INFO("%s: um22 AllocateCb begin: host %p size 0x%llx", __FUNCTION__,
+         host, (unsigned long long)size);
+    HRESULT hr = device->um22->pfnAllocateCb(device->hRTDevice, &allocate);
+    if (FAILED(hr) || !alloc.hAllocation)
+        ERROR("%s: sysmem AllocateCb failed: 0x%08lx (host %p size 0x%llx)", __FUNCTION__, hr,
+              host, (unsigned long long)size);
+    else
+        INFO("%s: sysmem allocation 0x%lx over host %p size 0x%llx", __FUNCTION__,
+             (unsigned long)alloc.hAllocation, host, (unsigned long long)size);
+}
+
 /* The runtime adds the offset of what it maps; the heap maps from its start. */
 static HRESULT APIENTRY map_heap(D3D12DDI_HDEVICE hDevice, D3D12DDI_HHEAP hHeap, void **data) {
     D3D12_UMD_Device *device = umd_device(hDevice);
@@ -333,6 +402,10 @@ static HRESULT APIENTRY map_heap(D3D12DDI_HDEVICE hDevice, D3D12DDI_HHEAP hHeap,
      * removed; leave the address undisclosed and let the API layer return its
      * expected Map result instead. */
     if (heap->committed && !heap->span) {
+        if (heap->hRTResource && !heap->sysmem_wrapped) {
+            heap->sysmem_wrapped = true;
+            wrap_committed_host_memory(device, heap->hRTResource, heap);
+        }
         /* A texture on a CPU-visible heap is host memory laid out exactly as
          * the inner vkd3d sees it; hand the runtime that pointer so its
          * Map/WriteToSubresource/ReadFromSubresource actually reach the GPU
