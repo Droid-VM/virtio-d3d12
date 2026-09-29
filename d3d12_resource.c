@@ -63,7 +63,10 @@ void d3d12_umd_resource_desc(const D3D12DDIARG_CREATERESOURCE_0003 *args, D3D12_
         .MipLevels = args->MipLevels,
         .Format = args->Format,
         .SampleDesc = args->SampleDesc,
-        .Layout = buffer ? D3D12_TEXTURE_LAYOUT_ROW_MAJOR : (D3D12_TEXTURE_LAYOUT)args->Layout,
+        /* Texture ROW_MAJOR describes the CPU staging layout selected by this
+         * UMD, not the optimal Vulkan image behind the inner resource. */
+        .Layout = buffer ? D3D12_TEXTURE_LAYOUT_ROW_MAJOR :
+                args->Layout == D3D12DDI_TL_ROW_MAJOR ? D3D12_TEXTURE_LAYOUT_UNKNOWN : (D3D12_TEXTURE_LAYOUT)args->Layout,
         .Flags = resource_flags(args->Flags, buffer),
     };
 }
@@ -491,7 +494,7 @@ static void allocation_info(D3D12_UMD_Device *device, const D3D12_RESOURCE_DESC 
     /* Zero is invalid for these DDI alignments even when no extra data is used. */
     out->AdditionalDataHeaderAlignment = 1;
     out->AdditionalDataAlignment = 1;
-    out->Layout = buffer ? D3D12DDI_TL_ROW_MAJOR : layout;
+    out->Layout = layout == D3D12DDI_TL_UNDEFINED ? D3D12DDI_TL_ROW_MAJOR : layout;
     if (d3d12_umd_log_enabled())
         INFO("allocation info: dim %d %llux%ux%u fmt %u flags 0x%x align 0x%x -> size 0x%llx align 0x%llx",
              desc->Dimension, (unsigned long long)desc->Width, desc->Height, desc->DepthOrArraySize, desc->Format,
@@ -512,6 +515,13 @@ static void APIENTRY check_existing_resource_allocation_info(D3D12DDI_HDEVICE hD
                                                              D3D12DDI_RESOURCE_ALLOCATION_INFO_0022 *out) {
     D3D12_UMD_Resource *resource = umd_resource(hResource);
     allocation_info(umd_device(hDevice), &resource->desc, 0, (D3D12DDI_TEXTURE_LAYOUT)resource->desc.Layout, out);
+    /* CPU-visible textures expose vkd3d's linear staging memory. The runtime
+     * needs its actual layout to construct the Map(NULL)/subresource swizzler;
+     * UNDEFINED is not a usable device-dependent layout identifier. */
+    void *cpu = NULL;
+    if (resource->desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER &&
+            SUCCEEDED(vkd3d_acquire_resource_cpu_pointer(resource->res, &cpu)) && cpu)
+        out->Layout = D3D12DDI_TL_ROW_MAJOR;
 }
 
 static void APIENTRY check_subresource_info(D3D12DDI_HDEVICE hDevice, D3D12DDI_HRESOURCE hResource, UINT subresource,
