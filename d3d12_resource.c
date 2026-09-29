@@ -329,6 +329,7 @@ static void APIENTRY destroy_heap_and_resource(D3D12DDI_HDEVICE hDevice, D3D12DD
  * ReadFromSubresource and CPU-visible heap mapping are built on exactly the
  * host pointer and subresource layout that the inner implementation uses. */
 extern HRESULT vkd3d_acquire_resource_cpu_pointer(ID3D12Resource *resource, void **data);
+extern HRESULT vkd3d_flush_resource_cpu_writes(ID3D12Resource *resource);
 extern HRESULT vkd3d_get_resource_subresource_layout(ID3D12Resource *resource, UINT subresource,
         UINT64 *offset, UINT64 *row_pitch, UINT64 *depth_pitch);
 
@@ -457,6 +458,11 @@ static void APIENTRY unmap_heap(D3D12DDI_HDEVICE hDevice, D3D12DDI_HHEAP hHeap) 
     (void)hDevice;
     D3D12_UMD_Heap *heap = hHeap.pDrvPrivate;
     ID3D12Resource *res = heap->span ? heap->span : heap->committed;
+    if (heap->committed && !heap->span) {
+        HRESULT hr = vkd3d_flush_resource_cpu_writes(heap->committed);
+        if (FAILED(hr))
+            ERROR("texture CPU write flush failed: 0x%08lx", hr);
+    }
     if (res)
         ID3D12Resource_Unmap(res, 0, NULL);
 }
