@@ -292,10 +292,25 @@ static HRESULT APIENTRY create_heap_and_resource(D3D12DDI_HDEVICE hDevice, const
     return hr;
 }
 
+static void untrack_mapped_texture(D3D12_UMD_Device *device, D3D12_UMD_Heap *heap) {
+    AcquireSRWLockExclusive(&device->mapped_texture_lock);
+    D3D12_UMD_Heap **entry = &device->mapped_textures;
+    while (*entry && *entry != heap)
+        entry = &(*entry)->mapped_next;
+    if (*entry) {
+        *entry = heap->mapped_next;
+        heap->mapped_next = NULL;
+        heap->cpu_mapped = false;
+    }
+    ReleaseSRWLockExclusive(&device->mapped_texture_lock);
+}
+
 static void APIENTRY destroy_heap_and_resource(D3D12DDI_HDEVICE hDevice, D3D12DDI_HHEAP hHeap, D3D12DDI_HRESOURCE hResource) {
     D3D12_UMD_Device *device = umd_device(hDevice);
     D3D12_UMD_Resource *resource = hResource.pDrvPrivate;
     D3D12_UMD_Heap *heap = hHeap.pDrvPrivate;
+    if (heap)
+        untrack_mapped_texture(device, heap);
     if (heap && heap->sysmem_allocation) {
         /* Release VidMm's reference to the pages before freeing their owner. */
         D3D12DDICB_DEALLOCATE_0022 deallocate = { .hResource = heap->hRTResource };
@@ -330,6 +345,16 @@ static void APIENTRY destroy_heap_and_resource(D3D12DDI_HDEVICE hDevice, D3D12DD
  * host pointer and subresource layout that the inner implementation uses. */
 extern HRESULT vkd3d_acquire_resource_cpu_pointer(ID3D12Resource *resource, void **data);
 extern HRESULT vkd3d_flush_resource_cpu_writes(ID3D12Resource *resource);
+HRESULT d3d12_umd_flush_mapped_textures(D3D12_UMD_Device *device) {
+    HRESULT hr = S_OK;
+    AcquireSRWLockExclusive(&device->mapped_texture_lock);
+    for (D3D12_UMD_Heap *heap = device->mapped_textures; heap; heap = heap->mapped_next) {
+        if (FAILED(hr = vkd3d_flush_resource_cpu_writes(heap->committed)))
+            break;
+    }
+    ReleaseSRWLockExclusive(&device->mapped_texture_lock);
+    return hr;
+}
 extern HRESULT vkd3d_get_resource_subresource_layout(ID3D12Resource *resource, UINT subresource,
         UINT64 *offset, UINT64 *row_pitch, UINT64 *depth_pitch);
 
@@ -435,6 +460,13 @@ static HRESULT APIENTRY map_heap(D3D12DDI_HDEVICE hDevice, D3D12DDI_HHEAP hHeap,
          * resource. GPU-only heaps keep the address undisclosed. */
         HRESULT hr2 = vkd3d_acquire_resource_cpu_pointer(heap->committed, data);
         if (SUCCEEDED(hr2)) {
+            AcquireSRWLockExclusive(&device->mapped_texture_lock);
+            if (!heap->cpu_mapped) {
+                heap->cpu_mapped = true;
+                heap->mapped_next = device->mapped_textures;
+                device->mapped_textures = heap;
+            }
+            ReleaseSRWLockExclusive(&device->mapped_texture_lock);
             /* A NULL inner Map is legal for textures and invalidates the GPU
              * range; UnmapHeap later flushes what the runtime wrote. */
             ID3D12Resource_Map(heap->committed, 0, NULL, NULL);
@@ -455,10 +487,11 @@ static HRESULT APIENTRY map_heap(D3D12DDI_HDEVICE hDevice, D3D12DDI_HHEAP hHeap,
 }
 
 static void APIENTRY unmap_heap(D3D12DDI_HDEVICE hDevice, D3D12DDI_HHEAP hHeap) {
-    (void)hDevice;
+    D3D12_UMD_Device *device = umd_device(hDevice);
     D3D12_UMD_Heap *heap = hHeap.pDrvPrivate;
     ID3D12Resource *res = heap->span ? heap->span : heap->committed;
     if (heap->committed && !heap->span) {
+        untrack_mapped_texture(device, heap);
         HRESULT hr = vkd3d_flush_resource_cpu_writes(heap->committed);
         if (FAILED(hr))
             ERROR("texture CPU write flush failed: 0x%08lx", hr);

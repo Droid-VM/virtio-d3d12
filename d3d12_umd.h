@@ -94,6 +94,8 @@ typedef struct {
     ID3D12Device2 *d3d12_2; /* CreatePipelineState: pipeline streams */
     ID3D12Device4 *d3d12_4; /* CreateCommandList1: lists that start closed */
     UINT descriptor_size[D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES];
+    SRWLOCK mapped_texture_lock;
+    struct D3D12_UMD_Heap *mapped_textures;
 } D3D12_UMD_Device;
 
 static inline D3D12_UMD_Device *umd_device(D3D12DDI_HDEVICE h) { return h.pDrvPrivate; }
@@ -101,6 +103,7 @@ static inline D3D12_UMD_Adapter *umd_adapter(D3D12DDI_HADAPTER h) { return h.pDr
 
 /* A failed VOID DDI reports here; the runtime removes the device. */
 void d3d12_umd_set_error(D3D12_UMD_Device *device, HRESULT hr);
+HRESULT d3d12_umd_flush_mapped_textures(D3D12_UMD_Device *device);
 
 /* ---------------------------------------------------------------------------
  * Driver objects. Each lives in the private memory the runtime sizes with the
@@ -139,6 +142,8 @@ struct D3D12_UMD_Heap {
     void *hRTResource;
     bool sysmem_wrapped;
     D3DKMT_HANDLE sysmem_allocation;
+    bool cpu_mapped;
+    struct D3D12_UMD_Heap *mapped_next;
 };
 
 typedef struct {

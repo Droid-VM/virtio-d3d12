@@ -231,6 +231,15 @@ static void APIENTRY execute_command_lists(D3D12DDI_HCOMMANDQUEUE hQueue, UINT c
         vk[i] = (ID3D12CommandList *)umd_cl(lists[i])->cl;
 
     UINT64 value = q->submitted + 1;
+    /* Native WriteToSubresource can leave a texture persistently mapped.
+     * Publish its staging bytes before GPU work consumes the image. */
+    HRESULT hr = d3d12_umd_flush_mapped_textures(q->device);
+    if (FAILED(hr)) {
+        d3d12_umd_set_error(q->device, hr);
+        if (vk != stack)
+            free(vk);
+        return;
+    }
     admit(q, value);
     ID3D12CommandQueue_ExecuteCommandLists(q->vq, count, vk);
     ID3D12CommandQueue_Signal(q->vq, q->exec_fence, value);
