@@ -540,17 +540,12 @@ static void APIENTRY cl_set_marker(D3D12DDI_HCOMMANDLIST hCL, UINT64 marker) {
     (void)marker;
 }
 
-/* Called both after a reset (root arguments already undefined there) and
- * from ClearState(), where the runtime only resets what it tracks itself:
- * the inner list still holds the root constants the last signatures left
- * behind, so clear the whole inner API state like the API contract for
- * ClearState demands. */
+/* UMD-only entry point in the statically linked vkd3d. The runtime may have
+ * already bound the initial PSO, so ClearState(NULL) would erase valid state. */
+extern void vkd3d_clear_root_arguments(ID3D12GraphicsCommandList *command_list);
+
 static void APIENTRY cl_clear_root_arguments(D3D12DDI_HCOMMANDLIST hCL) {
-    ID3D12GraphicsCommandList4 *cl4 = NULL;
-    if (SUCCEEDED(ID3D12GraphicsCommandList2_QueryInterface(CL(hCL), &IID_ID3D12GraphicsCommandList4, (void **)&cl4))) {
-        ID3D12GraphicsCommandList4_ClearState(cl4, NULL);
-        ID3D12GraphicsCommandList4_Release(cl4);
-    }
+    vkd3d_clear_root_arguments((ID3D12GraphicsCommandList *)CL(hCL));
 }
 
 static void APIENTRY cl_om_set_depth_bounds(D3D12DDI_HCOMMANDLIST hCL, FLOAT min, FLOAT max) {
