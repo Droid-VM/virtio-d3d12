@@ -77,6 +77,23 @@ static NTSTATUS APIENTRY wrap_wait_from_cpu(D3DKMT_WAITFORSYNCHRONIZATIONOBJECTF
              (unsigned long long)(args->ObjectCount ? args->FenceValueArray[0] : 0));
     return D3DKMTWaitForSynchronizationObjectFromCpu(args);
 }
+/* Allocation/lock path: Map(NULL) fails here somewhere; log the calls. */
+static NTSTATUS APIENTRY wrap_create_allocation(D3DKMT_CREATEALLOCATION *a) {
+    if (d3d12_umd_log_enabled())
+        INFO("%.3f kmt CreateAllocation: dev 0x%lx res 0x%lx count %u flags 0x%x", trace_ms(),
+             (unsigned long)a->hDevice, (unsigned long)a->hResource, a->NumAllocations, *(const UINT *)&a->Flags);
+    NTSTATUS s = D3DKMTCreateAllocation(a);
+    if (d3d12_umd_log_enabled())
+        INFO("%.3f kmt CreateAllocation: status 0x%lx", trace_ms(), (unsigned long)s);
+    return s;
+}
+
+static NTSTATUS APIENTRY wrap_lock(D3DKMT_LOCK *a) {
+    if (d3d12_umd_log_enabled())
+        INFO("%.3f kmt Lock: alloc 0x%lx flags 0x%x", trace_ms(), (unsigned long)a->hAllocation, *(const UINT *)&a->Flags);
+    return D3DKMTLock(a);
+}
+
 
 static struct {
     const char *name;
@@ -84,11 +101,220 @@ static struct {
     FARPROC gdi32_address;
 } trace_entries[] = {
     { "D3DKMTSignalSynchronizationObjectFromGpu", (void *)wrap_signal_from_gpu },
+    { "D3DKMTCreateAllocation", (void *)wrap_create_allocation },
+    { "D3DKMTLock", (void *)wrap_lock },
     { "D3DKMTSignalSynchronizationObjectFromGpu2", (void *)wrap_signal_from_gpu2 },
     { "D3DKMTSignalSynchronizationObjectFromCpu", (void *)wrap_signal_from_cpu },
     { "D3DKMTWaitForSynchronizationObjectFromGpu", (void *)wrap_wait_from_gpu },
     { "D3DKMTWaitForSynchronizationObjectFromCpu", (void *)wrap_wait_from_cpu },
 };
+
+/* Enumerate every D3DKMT function the runtime imports by ordinal: the
+ * resolved gdi32 address identifies the name. */
+static const char *const kmt_names[] = {
+    "D3DKMTAcquireKeyedMutex",
+    "D3DKMTAcquireKeyedMutex2",
+    "D3DKMTAdjustFullscreenGamma",
+    "D3DKMTCancelPresents",
+    "D3DKMTChangeSurfacePointer",
+    "D3DKMTChangeVideoMemoryReservation",
+    "D3DKMTCheckExclusiveOwnership",
+    "D3DKMTCheckMonitorPowerState",
+    "D3DKMTCheckMultiPlaneOverlaySupport",
+    "D3DKMTCheckMultiPlaneOverlaySupport2",
+    "D3DKMTCheckMultiPlaneOverlaySupport3",
+    "D3DKMTCheckOcclusion",
+    "D3DKMTCheckSharedResourceAccess",
+    "D3DKMTCheckVidPnExclusiveOwnership",
+    "D3DKMTCloseAdapter",
+    "D3DKMTCloseDxCoreDevice",
+    "D3DKMTConfigureSharedResource",
+    "D3DKMTConnectDoorbell",
+    "D3DKMTCreateAllocation",
+    "D3DKMTCreateAllocation2",
+    "D3DKMTCreateContext",
+    "D3DKMTCreateContextVirtual",
+    "D3DKMTCreateDCFromMemory",
+    "D3DKMTCreateDevice",
+    "D3DKMTCreateDoorbell",
+    "D3DKMTCreateHwContext",
+    "D3DKMTCreateHwQueue",
+    "D3DKMTCreateHwQueueForUserModeSubmission",
+    "D3DKMTCreateKeyedMutex",
+    "D3DKMTCreateKeyedMutex2",
+    "D3DKMTCreateNativeFence",
+    "D3DKMTCreateOutputDupl",
+    "D3DKMTCreateOverlay",
+    "D3DKMTCreatePagingQueue",
+    "D3DKMTCreateProtectedSession",
+    "D3DKMTCreateSyncFile",
+    "D3DKMTCreateSynchronizationObject",
+    "D3DKMTCreateSynchronizationObject2",
+    "D3DKMTDestroyAllocation",
+    "D3DKMTDestroyAllocation2",
+    "D3DKMTDestroyContext",
+    "D3DKMTDestroyDCFromMemory",
+    "D3DKMTDestroyDevice",
+    "D3DKMTDestroyDoorbell",
+    "D3DKMTDestroyHwContext",
+    "D3DKMTDestroyHwQueue",
+    "D3DKMTDestroyKeyedMutex",
+    "D3DKMTDestroyOutputDupl",
+    "D3DKMTDestroyOverlay",
+    "D3DKMTDestroyPagingQueue",
+    "D3DKMTDestroyProtectedSession",
+    "D3DKMTDestroySynchronizationObject",
+    "D3DKMTEnumAdapters",
+    "D3DKMTEnumAdapters2",
+    "D3DKMTEnumAdapters3",
+    "D3DKMTEscape",
+    "D3DKMTEvict",
+    "D3DKMTFlipOverlay",
+    "D3DKMTFlushHeapTransitions",
+    "D3DKMTFreeGpuVirtualAddress",
+    "D3DKMTGetAllocationPriority",
+    "D3DKMTGetContextInProcessSchedulingPriority",
+    "D3DKMTGetContextSchedulingPriority",
+    "D3DKMTGetDWMVerticalBlankEvent",
+    "D3DKMTGetDeviceState",
+    "D3DKMTGetDisplayModeList",
+    "D3DKMTGetMultiPlaneOverlayCaps",
+    "D3DKMTGetMultisampleMethodList",
+    "D3DKMTGetNativeFenceLogDetail",
+    "D3DKMTGetOverlayState",
+    "D3DKMTGetPostCompositionCaps",
+    "D3DKMTGetPresentHistory",
+    "D3DKMTGetPresentQueueEvent",
+    "D3DKMTGetProcessDeviceRemovalSupport",
+    "D3DKMTGetProcessSchedulingPriorityClass",
+    "D3DKMTGetResourcePresentPrivateDriverData",
+    "D3DKMTGetRuntimeData",
+    "D3DKMTGetScanLine",
+    "D3DKMTGetSharedPrimaryHandle",
+    "D3DKMTGetSharedResourceAdapterLuid",
+    "D3DKMTInvalidateActiveVidPn",
+    "D3DKMTInvalidateCache",
+    "D3DKMTIsFeatureEnabled",
+    "D3DKMTLock",
+    "D3DKMTLock2",
+    "D3DKMTMakeResident",
+    "D3DKMTMapGpuVirtualAddress",
+    "D3DKMTMarkDeviceAsError",
+    "D3DKMTNotifyWorkSubmission",
+    "D3DKMTOfferAllocations",
+    "D3DKMTOpenAdapterFromDeviceName",
+    "D3DKMTOpenAdapterFromGdiDisplayName",
+    "D3DKMTOpenAdapterFromHdc",
+    "D3DKMTOpenAdapterFromLuid",
+    "D3DKMTOpenKeyedMutex",
+    "D3DKMTOpenKeyedMutex2",
+    "D3DKMTOpenKeyedMutexFromNtHandle",
+    "D3DKMTOpenNativeFenceFromNtHandle",
+    "D3DKMTOpenNtHandleFromName",
+    "D3DKMTOpenProtectedSessionFromNtHandle",
+    "D3DKMTOpenResource",
+    "D3DKMTOpenResource2",
+    "D3DKMTOpenResourceFromNtHandle",
+    "D3DKMTOpenSyncObjectFromNtHandle",
+    "D3DKMTOpenSyncObjectFromNtHandle2",
+    "D3DKMTOpenSyncObjectFromSyncFile",
+    "D3DKMTOpenSyncObjectNtHandleFromName",
+    "D3DKMTOpenSynchronizationObject",
+    "D3DKMTOutputDuplGetFrameInfo",
+    "D3DKMTOutputDuplGetMetaData",
+    "D3DKMTOutputDuplGetPointerShapeData",
+    "D3DKMTOutputDuplPresent",
+    "D3DKMTOutputDuplPresentToHwQueue",
+    "D3DKMTOutputDuplReleaseFrame",
+    "D3DKMTPollDisplayChildren",
+    "D3DKMTPresent",
+    "D3DKMTPresentMultiPlaneOverlay",
+    "D3DKMTPresentMultiPlaneOverlay2",
+    "D3DKMTPresentMultiPlaneOverlay3",
+    "D3DKMTPresentRedirected",
+    "D3DKMTQueryAdapterInfo",
+    "D3DKMTQueryAllocationResidency",
+    "D3DKMTQueryClockCalibration",
+    "D3DKMTQueryFSEBlock",
+    "D3DKMTQueryFeatureInterface",
+    "D3DKMTQueryProcessOfferInfo",
+    "D3DKMTQueryProtectedSessionInfoFromNtHandle",
+    "D3DKMTQueryProtectedSessionStatus",
+    "D3DKMTQueryRemoteVidPnSourceFromGdiDisplayName",
+    "D3DKMTQueryResourceInfo",
+    "D3DKMTQueryResourceInfoFromNtHandle",
+    "D3DKMTQueryStatistics",
+    "D3DKMTQueryVidPnExclusiveOwnership",
+    "D3DKMTQueryVideoMemoryInfo",
+    "D3DKMTReclaimAllocations",
+    "D3DKMTReclaimAllocations2",
+    "D3DKMTRegisterTrimNotification",
+    "D3DKMTRegisterVailProcess",
+    "D3DKMTReleaseKeyedMutex",
+    "D3DKMTReleaseKeyedMutex2",
+    "D3DKMTReleaseProcessVidPnSourceOwners",
+    "D3DKMTRender",
+    "D3DKMTReserveGpuVirtualAddress",
+    "D3DKMTResizeRingBuffer",
+    "D3DKMTSetAllocationPriority",
+    "D3DKMTSetContextInProcessSchedulingPriority",
+    "D3DKMTSetContextSchedulingPriority",
+    "D3DKMTSetDisplayMode",
+    "D3DKMTSetDisplayPrivateDriverFormat",
+    "D3DKMTSetFSEBlock",
+    "D3DKMTSetGammaRamp",
+    "D3DKMTSetHwProtectionTeardownRecovery",
+    "D3DKMTSetMonitorColorSpaceTransform",
+    "D3DKMTSetProcessSchedulingPriorityClass",
+    "D3DKMTSetQueuedLimit",
+    "D3DKMTSetStablePowerState",
+    "D3DKMTSetSyncRefreshCountWaitTarget",
+    "D3DKMTSetVidPnSourceHwProtection",
+    "D3DKMTSetVidPnSourceOwner",
+    "D3DKMTSetVidPnSourceOwner1",
+    "D3DKMTSetVidPnSourceOwner2",
+    "D3DKMTShareObjectWithHost",
+    "D3DKMTShareObjects",
+    "D3DKMTSharedPrimaryLockNotification",
+    "D3DKMTSharedPrimaryUnLockNotification",
+    "D3DKMTSignalSynchronizationObject",
+    "D3DKMTSignalSynchronizationObject2",
+    "D3DKMTSignalSynchronizationObjectFromCpu",
+    "D3DKMTSignalSynchronizationObjectFromGpu",
+    "D3DKMTSignalSynchronizationObjectFromGpu2",
+    "D3DKMTSubmitCommand",
+    "D3DKMTSubmitCommandToHwQueue",
+    "D3DKMTSubmitPresentBltToHwQueue",
+    "D3DKMTSubmitPresentToHwQueue",
+    "D3DKMTSubmitSignalSyncObjectsToHwQueue",
+    "D3DKMTSubmitWaitForSyncObjectsToHwQueue",
+    "D3DKMTTrimProcessCommitment",
+    "D3DKMTUnlock",
+    "D3DKMTUnlock2",
+    "D3DKMTUnregisterTrimNotification",
+    "D3DKMTUpdateAllocationProperty",
+    "D3DKMTUpdateGpuVirtualAddress",
+    "D3DKMTUpdateOverlay",
+    "D3DKMTWaitForIdle",
+    "D3DKMTWaitForSynchronizationObject",
+    "D3DKMTWaitForSynchronizationObject2",
+    "D3DKMTWaitForSynchronizationObjectFromCpu",
+    "D3DKMTWaitForSynchronizationObjectFromGpu",
+    "D3DKMTWaitForVerticalBlankEvent",
+    "D3DKMTWaitForVerticalBlankEvent2",
+    "D3DKMTWaitSyncFile",
+};
+
+
+static const char *kmt_name_for(FARPROC resolved) {
+    HMODULE gdi = GetModuleHandleA("gdi32.dll");
+    if (!gdi)
+        return NULL;
+    for (size_t i = 0; i < ARRAY_SIZE(kmt_names); i++)
+        if (GetProcAddress(gdi, kmt_names[i]) == resolved)
+            return kmt_names[i];
+    return NULL;
+}
 
 static bool is_d3dkmt_api_set(const char *dll) {
     return strstr(dll, "d3dkmt") != NULL;
@@ -114,6 +340,10 @@ static bool patch_delay_import(BYTE *base, const delay_import *import, const cha
         FARPROC resolved = GetProcAddress(api, (LPCSTR)(uintptr_t)IMAGE_ORDINAL(names->u1.Ordinal));
         if (!resolved)
             continue;
+        if (d3d12_umd_log_enabled()) {
+            const char *n = kmt_name_for(resolved);
+            INFO("kmt delay import ordinal %u -> %s", (unsigned)IMAGE_ORDINAL(names->u1.Ordinal), n ? n : "?");
+        }
         for (size_t e = 0; e < ARRAY_SIZE(trace_entries); e++) {
             if (resolved != trace_entries[e].gdi32_address)
                 continue;
