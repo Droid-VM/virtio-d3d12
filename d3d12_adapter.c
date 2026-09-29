@@ -203,7 +203,7 @@ static HRESULT APIENTRY d3d12_umd_close_adapter(D3D12DDI_HADAPTER hAdapter) {
 static HRESULT APIENTRY d3d12_umd_get_supported_versions(D3D12DDI_HADAPTER hAdapter, UINT32 *puEntries,
                                                         UINT64 *pSupportedDDIInterfaceVersions) {
     (void)hAdapter;
-    static const UINT64 versions[] = { D3D12DDI_SUPPORTED_0041 };
+    static const UINT64 versions[] = { D3D12DDI_SUPPORTED_0098, D3D12DDI_SUPPORTED_0041 };
 
     /* Count first (NULL array), then fill. */
     if (pSupportedDDIInterfaceVersions) {
@@ -241,12 +241,26 @@ static HRESULT APIENTRY d3d12_umd_fill_ddi_table(D3D12DDI_HADAPTER hAdapter, D3D
 
     switch (type) {
     case D3D12DDI_TABLE_TYPE_DEVICE_CORE: {
+        if (size == sizeof(D3D12DDI_DEVICE_FUNCS_CORE_0096)) {
+            d3d12_umd_fill_modern_core(pTable);
+            return S_OK;
+        }
+        if (size != sizeof(D3D12DDI_DEVICE_FUNCS_CORE_0040))
+            return E_INVALIDARG;
         D3D12DDI_DEVICE_FUNCS_CORE_0040 t;
         d3d12_umd_fill_core(&t);
         copy_table("core", pTable, size, &t, sizeof(t));
         return S_OK;
     }
     case D3D12DDI_TABLE_TYPE_COMMAND_LIST_3D: {
+        if (size == sizeof(D3D12DDI_COMMAND_LIST_FUNCS_3D_0095)) {
+            d3d12_umd_fill_modern_command_list(pTable);
+            if (index < ARRAY_SIZE(adapter->cl_tables))
+                adapter->cl_tables[index] = hRTTable;
+            return S_OK;
+        }
+        if (size != sizeof(D3D12DDI_COMMAND_LIST_FUNCS_3D_0040))
+            return E_INVALIDARG;
         D3D12DDI_COMMAND_LIST_FUNCS_3D_0040 t;
         d3d12_umd_fill_command_list(&t);
         copy_table("command list", pTable, size, &t, sizeof(t));
@@ -260,6 +274,11 @@ static HRESULT APIENTRY d3d12_umd_fill_ddi_table(D3D12DDI_HADAPTER hAdapter, D3D
         copy_table("command queue", pTable, size, &t, sizeof(t));
         return S_OK;
     }
+    case D3D12DDI_TABLE_TYPE_0096_EXTENDED_FEATURES:
+        if (size != sizeof(D3D12DDI_EXTENDED_FEATURES_FUNCS_0096))
+            return E_INVALIDARG;
+        d3d12_umd_fill_modern_extended_features(pTable);
+        return S_OK;
     case D3D12DDI_TABLE_TYPE_0020_EXTENDED_FEATURES: {
         /* 24 bytes is the _0020 shape, 32 the _0021 one; the first three
          * slots are common. */

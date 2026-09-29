@@ -20,8 +20,11 @@
 #include <d3dumddi.h>
 #include <d3d12umddi.h>
 
-#include <d3d12.h>
 #include <dxgi.h>
+/* The DDI headers already provide the SDK DXGI types. */
+#define __vkd3d_dxgiformat_h__
+#define __vkd3d_dxgitype_h__
+#include <vkd3d_d3d12.h>
 
 #ifndef VK_USE_PLATFORM_WIN32_KHR
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -190,6 +193,7 @@ typedef struct {
 
 typedef struct {
     D3D12DDI_DEPTH_STENCIL_DESC_0025 desc;
+    UINT8 back_read_mask, back_write_mask;
 } D3D12_UMD_DepthStencilState;
 
 typedef struct {
@@ -283,3 +287,7 @@ void d3d12_umd_stub_fill_core(D3D12DDI_DEVICE_FUNCS_CORE_0040 *t);
 void d3d12_umd_stub_fill_cl(D3D12DDI_COMMAND_LIST_FUNCS_3D_0040 *t);
 void d3d12_umd_stub_fill_queue(D3D12DDI_COMMAND_QUEUE_FUNCS_CORE_0001 *t);
 void d3d12_umd_stub_fill_ext(D3D12DDI_EXTENDED_FEATURES_FUNCS_0021 *t);
+
+void d3d12_umd_fill_modern_core(D3D12DDI_DEVICE_FUNCS_CORE_0096 *t);
+void d3d12_umd_fill_modern_command_list(D3D12DDI_COMMAND_LIST_FUNCS_3D_0095 *t);
+void d3d12_umd_fill_modern_extended_features(D3D12DDI_EXTENDED_FEATURES_FUNCS_0096 *t);

@@ -14,7 +14,7 @@ OBJCOPY=$(PREFIX)-objcopy
 STRIP=$(PREFIX)-strip
 
 INCLUDES=include/winddk $(D3D11_DIR)/include/winddk $(D3D11_DIR)/include \
-         $(VKD3D_SRC)/include $(VKD3D_SRC)/khronos/Vulkan-Headers/include
+         $(VKD3D_BUILD)/libs/vkd3d-common/libvkd3d_common.a.p $(VKD3D_SRC)/include $(VKD3D_SRC)/khronos/Vulkan-Headers/include
 CFLAGS=-std=gnu23 -O2 -g -Wall -Wno-unknown-pragmas -Wno-missing-braces -ffunction-sections -fdata-sections \
        -MMD -MP $(LTO) -ffile-prefix-map=$(CURDIR)=./
 # -iquote: only "vk_bootstrap.h" comes from dx11um; its dxgi.h must not shadow <dxgi.h>.
@@ -29,7 +29,7 @@ VKD3D_LIBS=$(addprefix $(VKD3D_BUILD)/,libs/vkd3d/libvkd3d-proton.a libs/vkd3d-s
            subprojects/dxil-spirv/libdxbc_spv_module.a subprojects/dxil-spirv/subprojects/dxbc-spirv/libdxbc_spv.a)
 
 UMD_NAME := dx12um_virtio
-OBJS=$(addprefix $(BUILD_DIR)/,d3d12_adapter.o d3d12_caps.o d3d12_device.o d3d12_objects.o d3d12_resource.o d3d12_present.o \
+OBJS=$(addprefix $(BUILD_DIR)/,d3d12_adapter.o d3d12_modern.o d3d12_caps.o d3d12_device.o d3d12_objects.o d3d12_resource.o d3d12_present.o \
      d3d12_descriptor.o d3d12_pipeline.o d3d12_cmdlist.o d3d12_queue.o ddi_stubs.o d3d12_vkd3d_glue.o \
      d3d12_kmt_trace.o vk_bootstrap.o)
 

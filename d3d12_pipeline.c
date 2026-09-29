@@ -51,7 +51,10 @@ static SIZE_T APIENTRY calc_depth_stencil_state_size(D3D12DDI_HDEVICE hDevice, c
 static void APIENTRY create_depth_stencil_state(D3D12DDI_HDEVICE hDevice, const D3D12DDI_DEPTH_STENCIL_DESC_0025 *desc,
                                                 D3D12DDI_HDEPTHSTENCILSTATE handle) {
     (void)hDevice;
-    ((D3D12_UMD_DepthStencilState *)handle.pDrvPrivate)->desc = *desc;
+    D3D12_UMD_DepthStencilState *state = handle.pDrvPrivate;
+    state->desc = *desc;
+    state->back_read_mask = desc->StencilReadMask;
+    state->back_write_mask = desc->StencilWriteMask;
 }
 
 static void APIENTRY destroy_depth_stencil_state(D3D12DDI_HDEVICE hDevice, D3D12DDI_HDEPTHSTENCILSTATE handle) {
@@ -525,7 +528,7 @@ typedef struct {
     SUBOBJECT(D3D12_BLEND_DESC) blend;
     SUBOBJECT(UINT) sample_mask;
     SUBOBJECT(D3D12_RASTERIZER_DESC) rasterizer;
-    SUBOBJECT(D3D12_DEPTH_STENCIL_DESC1) depth_stencil;
+    SUBOBJECT(D3D12_DEPTH_STENCIL_DESC2) depth_stencil;
     SUBOBJECT(D3D12_INPUT_LAYOUT_DESC) input_layout;
     SUBOBJECT(D3D12_INDEX_BUFFER_STRIP_CUT_VALUE) strip_cut;
     SUBOBJECT(D3D12_PRIMITIVE_TOPOLOGY_TYPE) topology;
@@ -586,25 +589,32 @@ static D3D12_DEPTH_STENCILOP_DESC stencil_op(const D3D12DDI_DEPTH_STENCILOP_DESC
     };
 }
 
-static D3D12_DEPTH_STENCIL_DESC1 depth_stencil_desc(D3D12DDI_HDEPTHSTENCILSTATE handle) {
+static D3D12_DEPTH_STENCILOP_DESC1 stencil_op2(const D3D12DDI_DEPTH_STENCILOP_DESC *op,
+        BOOL enable, UINT8 read_mask, UINT8 write_mask) {
+    D3D12_DEPTH_STENCILOP_DESC old = stencil_op(op, enable);
+    return (D3D12_DEPTH_STENCILOP_DESC1) {
+        old.StencilFailOp, old.StencilDepthFailOp, old.StencilPassOp, old.StencilFunc,
+        read_mask, write_mask,
+    };
+}
+
+static D3D12_DEPTH_STENCIL_DESC2 depth_stencil_desc(D3D12DDI_HDEPTHSTENCILSTATE handle) {
     const D3D12_UMD_DepthStencilState *state = handle.pDrvPrivate;
     if (!state)
-        return (D3D12_DEPTH_STENCIL_DESC1) {
+        return (D3D12_DEPTH_STENCIL_DESC2) {
             .DepthEnable = TRUE, .DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL, .DepthFunc = D3D12_COMPARISON_FUNC_LESS,
-            .FrontFace = stencil_op(NULL, FALSE), .BackFace = stencil_op(NULL, FALSE),
+            .FrontFace = stencil_op2(NULL, FALSE, 0, 0), .BackFace = stencil_op2(NULL, FALSE, 0, 0),
         };
     const D3D12DDI_DEPTH_STENCIL_DESC_0025 *s = &state->desc;
     /* The DDI can switch the stencil test per face; the API cannot, so a
      * disabled face keeps its stencil. */
-    return (D3D12_DEPTH_STENCIL_DESC1) {
+    return (D3D12_DEPTH_STENCIL_DESC2) {
         .DepthEnable = s->DepthEnable,
         .DepthWriteMask = (D3D12_DEPTH_WRITE_MASK)s->DepthWriteMask,
         .DepthFunc = (D3D12_COMPARISON_FUNC)s->DepthFunc,
         .StencilEnable = s->StencilEnable,
-        .StencilReadMask = s->StencilReadMask,
-        .StencilWriteMask = s->StencilWriteMask,
-        .FrontFace = stencil_op(&s->FrontFace, s->FrontEnable),
-        .BackFace = stencil_op(&s->BackFace, s->BackEnable),
+        .FrontFace = stencil_op2(&s->FrontFace, s->FrontEnable, s->StencilReadMask, s->StencilWriteMask),
+        .BackFace = stencil_op2(&s->BackFace, s->BackEnable, state->back_read_mask, state->back_write_mask),
         .DepthBoundsTestEnable = s->DepthBoundsTestEnable,
     };
 }
@@ -663,7 +673,7 @@ static HRESULT create_graphics_pipeline(D3D12_UMD_Device *device, const D3D12DDI
     s.sample_mask.data = args->SampleMask;
     s.rasterizer.type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER;
     s.rasterizer.data = rasterizer_desc(args->hRasterizerState);
-    s.depth_stencil.type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL1;
+    s.depth_stencil.type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL2;
     s.depth_stencil.data = depth_stencil_desc(args->hDepthStencilState);
     s.input_layout.type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT;
     D3D12_INPUT_ELEMENT_DESC *elements = input_layout(args->hElementLayout, &s.input_layout.data.NumElements);
