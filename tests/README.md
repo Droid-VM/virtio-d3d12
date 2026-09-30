@@ -32,14 +32,26 @@ makes its window topmost. This is a smoke test, not game compatibility coverage.
 - The existing native ARM64 D3D12 Hello Texture sample also ran for 8 seconds
   with a live window and exited 0 after CloseMainWindow on 1172. Its UMD module
   path was recorded. This regression checked lifecycle, not screenshot pixels.
+- 1173: FLIPEX creation failed because simultaneous-access render targets had
+  no runtime allocation for CreateSharedHandle. The same standalone D3D12
+  shared-handle probe passed on WARP and failed on VirtIO before the fix.
+  Eligible single-mip/single-sample 2D render targets now use runtime-backed
+  linear images at creation. ARM64/ARM64EC/x64 FLIPEX each passed readback,
+  120 presents, screen pixels and exit 0; ARM64 DISCARD also passed.
+  The pixel probe is now DPI-aware and uses a matching 256x256 client area.
 
 Evidence is kept under `../../debug-20260930/d3d9on12-117*/`.
 The implementation currently accepts a single-mip, single-sample 2D source
 at subresource zero with no explicit destination. It adds one GPU copy and
-a CPU completion wait per legacy present. Automatic redirection of unmodified
-D3D9 applications, FLIPEX, reset/fullscreen, shared resources and x86 support
-are not established by this probe. FLIPEX remains an unresolved creation
-failure; the successful path explicitly uses DISCARD. No full suite was run.
+a CPU completion wait per legacy present when a shadow copy is needed.
+FLIPEX uses the runtime-backed resource directly. This is not a blanket claim
+of support for all shared heaps/formats or zero-copy presentation throughout
+the compositor. Fullscreen and x86 remain unverified. No full suite was run.
+
+For ordinary D3D9 applications, see [the app-local proxy](../d3d9-proxy/README.md).
+The explicit probe also accepts `--shared` and `--shared --warp` for the
+shared-handle comparison; `D3D9ON12_DEBUG=1` enables the D3D12 debug layer and
+dumps its stored messages on failure.
 
 ## D3D12 fence load probe
 
