@@ -145,6 +145,7 @@ static void APIENTRY cl_close(D3D12DDI_HCOMMANDLIST hCL) {
 }
 
 static void APIENTRY cl_reset(D3D12DDI_HCOMMANDLIST hCL, const D3D12DDIARG_RESETCOMMANDLIST_0040 *args) {
+    umd_cl(hCL)->synchronous_present = false;
     D3D12_UMD_CommandList *list = umd_cl(hCL);
     D3D12_UMD_CommandRecorder *recorder = args->hDrvCommandRecorder.pDrvPrivate;
     ID3D12CommandAllocator *allocator = recorder && recorder->pool ? pool_allocator(recorder->pool, list->type) : NULL;
@@ -603,6 +604,52 @@ static void APIENTRY cl_present(D3D12DDI_HCOMMANDLIST hCL, D3D12DDI_HCOMMANDQUEU
         return;
     }
     D3D12_UMD_Resource *resource = umd_resource(args->phSurfacesToPresent[0].hSurface);
+    /* 9On12's blt backbuffers are ordinary committed textures, not PRIMARY
+     * heaps. Preserve their rendering storage and copy to a runtime-owned
+     * linear allocation on the present command list. AddedGpuWork makes the
+     * runtime submit that list before its kernel present. */
+    if (resource && !resource->hKMAllocation) {
+        if (args->phSurfacesToPresent[0].SubResourceIndex || args->hDstResource.pDrvPrivate ||
+                resource->desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+                resource->desc.SampleDesc.Count != 1 || resource->desc.DepthOrArraySize != 1 ||
+                resource->desc.MipLevels != 1) {
+            d3d12_umd_set_error(device, E_NOTIMPL);
+            return;
+        }
+        if (!resource->present_shadow) {
+            D3D12_UMD_Resource *shadow = calloc(1, sizeof(*shadow));
+            if (!shadow) { d3d12_umd_set_error(device, E_OUTOFMEMORY); return; }
+            shadow->desc = resource->desc;
+            HRESULT hr = d3d12_umd_create_primary(device, shadow, resource->hRTResource);
+            if (FAILED(hr)) {
+                if (shadow->res) ID3D12Resource_Release(shadow->res);
+                d3d12_umd_destroy_primary(device, shadow);
+                free(shadow);
+                d3d12_umd_set_error(device, hr);
+                return;
+            }
+            resource->present_shadow = shadow;
+        }
+        D3D12_UMD_Resource *shadow = resource->present_shadow;
+        D3D12_RESOURCE_BARRIER barriers[2] = {
+            { .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+              .Transition = { .pResource = resource->res, .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                  .StateBefore = D3D12_RESOURCE_STATE_PRESENT, .StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE } },
+            { .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+              .Transition = { .pResource = shadow->res, .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                  .StateBefore = D3D12_RESOURCE_STATE_PRESENT, .StateAfter = D3D12_RESOURCE_STATE_COPY_DEST } },
+        };
+        ID3D12GraphicsCommandList2_ResourceBarrier(umd_cl(hCL)->cl, 2, barriers);
+        ID3D12GraphicsCommandList2_CopyResource(umd_cl(hCL)->cl, shadow->res, resource->res);
+        for (UINT i = 0; i < 2; ++i) {
+            barriers[i].Transition.StateBefore = barriers[i].Transition.StateAfter;
+            barriers[i].Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+        }
+        ID3D12GraphicsCommandList2_ResourceBarrier(umd_cl(hCL)->cl, 2, barriers);
+        out->AddedGpuWork = TRUE;
+        umd_cl(hCL)->synchronous_present = true;
+        resource = shadow;
+    }
     /* ECL installed the GPU completion wait on this context before returning;
      * the runtime queues present after that wait. */
     HANDLE context = d3d12_umd_present_context(hQueue);

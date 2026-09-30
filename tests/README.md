@@ -1,5 +1,42 @@
 # D3D12 fence load probe
 
+## System D3D9On12 probe
+
+Build with `bash tests/build_d3d9on12.sh`. The default output is
+`../../dist/d3d9on12-probe/`, with ARM64, ARM64EC and x64 executables.
+Run `run_d3d9on12.ps1 -Arch aarch64 -Present` in the interactive desktop
+(for example using an interactive scheduled task). Omitting `-Present`
+tests rendering and readback only. `-Flip` separately probes D3D9Ex FLIPEX.
+The runner records stdout, stderr and exit status and imposes a 45-second
+process timeout; this cannot recover a kernel driver hang.
+
+The probe explicitly loads system DXGI/D3D12/D3D9, supplies a VirtIO hardware
+D3D12 device to Direct3DCreate9On12Ex, matches the D3D9 adapter by LUID, and
+checks the underlying COM device identity and loaded modules. It checks exact
+pixels for a clear, a fixed-function triangle and a dynamic texture upload.
+Present mode additionally checks 120 PresentEx calls and visible client-area
+pixels. Run with an unobscured interactive desktop; the probe temporarily
+makes its window topmost. This is a smoke test, not game compatibility coverage.
+
+2026-09-30, Windows ARM64 guest 192.168.1.121:
+
+- 1170: ARM64/ARM64EC/x64 rendering and texture readback passed. ARM64 and
+  ARM64EC DISCARD Present crashed after the UMD rejected a source without a
+  KMT allocation. ARM64 FLIPEX device creation returned E_INVALIDARG.
+- 1171: a lazy runtime-backed shadow surface removed that rejection, but
+  kernel Present and the queue worker's CPU fence signal stalled concurrently.
+- 1172 after reboot: ARM64 passed all readback checks, 120 DISCARD presents,
+  visible window pixel checks and normal exit 0. Blt copy command lists now
+  wait for the queue worker to retire their completion fence before returning
+  to the runtime's kernel Present. Native PRIMARY presentation is unchanged.
+
+Evidence is kept under `../../debug-20260930/d3d9on12-117*/`.
+The implementation currently accepts a single-mip, single-sample 2D source
+at subresource zero with no explicit destination. It adds one GPU copy and
+a CPU completion wait per legacy present. Automatic redirection of unmodified
+D3D9 applications, FLIPEX, reset/fullscreen, shared resources and x86 support
+are not established by this probe.
+
 Build for each Windows guest architecture with llvm-mingw:
 
 ```sh

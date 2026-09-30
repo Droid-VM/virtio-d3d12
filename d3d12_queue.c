@@ -43,6 +43,7 @@ typedef struct {
     ID3D12Fence *exec_fence, *admit_fence;
 
     SRWLOCK lock;
+    CONDITION_VARIABLE retired_cv;
     UINT64 submitted; /* value of the last ECL; written by the ECL thread only */
     bool exiting;
     D3D12_UMD_Admission *pending; /* FIFO of gated ECLs, a ring */
@@ -123,7 +124,10 @@ static DWORD WINAPI queue_worker(void *param) {
         UINT64 done = ID3D12Fence_GetCompletedValue(q->exec_fence);
         if (done > q->signaled) {
             signal_done(q, done);
+            AcquireSRWLockExclusive(&q->lock);
             q->signaled = done;
+            WakeAllConditionVariable(&q->retired_cv);
+            ReleaseSRWLockExclusive(&q->lock);
         }
 
         AcquireSRWLockExclusive(&q->lock);
@@ -249,6 +253,25 @@ static void APIENTRY execute_command_lists(D3D12DDI_HCOMMANDQUEUE hQueue, UINT c
     q->submitted = value;
     ReleaseSRWLockExclusive(&q->lock);
     SetEvent(q->wake);
+
+    bool synchronous_present = false;
+    for (UINT i = 0; i < count; ++i)
+        synchronous_present |= umd_cl(lists[i])->synchronous_present;
+    if (synchronous_present) {
+        /* Legacy blt Present can block in dxgkrnl while holding locks also
+         * needed by SignalSynchronizationObjectFromCpu. Retire the present
+         * copy and its monitored-fence signal before entering that syscall. */
+        AcquireSRWLockExclusive(&q->lock);
+        while (q->signaled < value) {
+            if (!SleepConditionVariableSRW(&q->retired_cv, &q->lock, 5000, 0)) {
+                ReleaseSRWLockExclusive(&q->lock);
+                d3d12_umd_set_error(q->device, DXGI_ERROR_DEVICE_HUNG);
+                if (vk != stack) free(vk);
+                return;
+            }
+        }
+        ReleaseSRWLockExclusive(&q->lock);
+    }
 
     q->ecl_count++;
     if (d3d12_umd_log_enabled())

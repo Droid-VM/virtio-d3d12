@@ -192,6 +192,8 @@ static HRESULT APIENTRY create_heap_and_resource(D3D12DDI_HDEVICE hDevice, const
         memset(heap, 0, sizeof(*heap));
     if (resource)
         memset(resource, 0, sizeof(*resource));
+    if (resource)
+        resource->hRTResource = hRTResource;
 
     D3D12_RESOURCE_DESC desc;
     if (res_args)
@@ -323,6 +325,13 @@ static void APIENTRY destroy_heap_and_resource(D3D12DDI_HDEVICE hDevice, D3D12DD
         }
     }
     if (resource) {
+        if (resource->present_shadow) {
+            D3D12_UMD_Resource *shadow = resource->present_shadow;
+            if (shadow->res)
+                ID3D12Resource_Release(shadow->res);
+            d3d12_umd_destroy_primary(device, shadow);
+            free(shadow);
+        }
         if (resource->res)
             ID3D12Resource_Release(resource->res);
         d3d12_umd_destroy_primary(device, resource);

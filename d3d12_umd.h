@@ -115,7 +115,7 @@ HRESULT d3d12_umd_flush_mapped_textures(D3D12_UMD_Device *device);
 
 typedef struct D3D12_UMD_Heap D3D12_UMD_Heap;
 
-typedef struct {
+typedef struct D3D12_UMD_Resource {
     ID3D12Resource *res;
     D3D12_RESOURCE_DESC desc;
     /* The heap a buffer or placed resource lives in, and where: placed
@@ -129,6 +129,7 @@ typedef struct {
     D3DKMT_HANDLE hKMAllocation;
     D3DKMT_HANDLE hKMResource;
     D3D12DDI_HRTRESOURCE hRTResource;
+    struct D3D12_UMD_Resource *present_shadow;
 } D3D12_UMD_Resource;
 
 struct D3D12_UMD_Heap {
@@ -224,6 +225,7 @@ typedef struct {
     D3D12DDI_HRTCOMMANDLIST hRT;
     ID3D12GraphicsCommandList2 *cl;
     D3D12_COMMAND_LIST_TYPE type;
+    bool synchronous_present;
 } D3D12_UMD_CommandList;
 
 typedef struct {
