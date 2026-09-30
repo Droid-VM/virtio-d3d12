@@ -275,6 +275,9 @@ void d3d12_umd_install_pipeline_core(D3D12DDI_DEVICE_FUNCS_CORE_0040 *t);
 
 /* d3d12_resource.c */
 void d3d12_umd_resource_desc(const D3D12DDIARG_CREATERESOURCE_0003 *args, D3D12_RESOURCE_DESC *desc);
+bool d3d12_umd_shareable_texture(const D3D12_RESOURCE_DESC *desc);
+HRESULT d3d12_umd_create_linear_texture(D3D12_UMD_Device *device, D3D12_UMD_Resource *resource,
+                                      D3D12DDI_HRTRESOURCE hRTResource, bool primary);
 HRESULT d3d12_umd_create_primary(D3D12_UMD_Device *device, D3D12_UMD_Resource *resource,
                                   D3D12DDI_HRTRESOURCE hRTResource);
 void d3d12_umd_destroy_primary(D3D12_UMD_Device *device, D3D12_UMD_Resource *resource);

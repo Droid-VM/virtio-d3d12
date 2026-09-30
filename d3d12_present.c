@@ -10,6 +10,7 @@ static __thread struct {
     D3DKMT_HANDLE allocation, resource;
 } last_alloc;
 static __thread void *primary_rt_resource;
+static __thread bool runtime_primary;
 static int runtime_alloc(void *ctx, const VIRTIO_WDDM_RuntimeAllocRequest *req,
                          VIRTIO_WDDM_RuntimeAllocResult *out) {
     D3D12_UMD_Device *device = ctx;
@@ -38,10 +39,10 @@ static int runtime_alloc(void *ctx, const VIRTIO_WDDM_RuntimeAllocRequest *req,
         mode.dmDisplayFrequency && mode.dmDisplayFrequency <= 1000)
         primary.refresh_numerator = mode.dmDisplayFrequency;
     D3D12DDI_ALLOCATION_INFO_0022 info = {
-        .pPrivateDriverData = &primary,
-        .PrivateDriverDataSize = sizeof(primary),
+        .pPrivateDriverData = runtime_primary ? (void *)&primary : (void *)&primary.base,
+        .PrivateDriverDataSize = runtime_primary ? sizeof(primary) : sizeof(primary.base),
         .VidPnSourceId = 0,
-        .Flags = D3D12DDI_ALLOCATION_INFO_FLAGS_0022_PRIMARY,
+        .Flags = runtime_primary ? D3D12DDI_ALLOCATION_INFO_FLAGS_0022_PRIMARY : D3D12DDI_ALLOCATION_INFO_FLAGS_0022_NONE,
     };
     D3D12DDICB_ALLOCATE_0022 allocate = {
         .pPrivateDriverData = &resource,
@@ -183,8 +184,17 @@ static HRESULT make_resident(D3D12_UMD_Device *device, D3DKMT_HANDLE allocation)
     return hr;
 }
 
-HRESULT d3d12_umd_create_primary(D3D12_UMD_Device *device, D3D12_UMD_Resource *resource,
-                                  D3D12DDI_HRTRESOURCE hRTResource) {
+bool d3d12_umd_shareable_texture(const D3D12_RESOURCE_DESC *desc) {
+    return desc->Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D &&
+        desc->DepthOrArraySize == 1 && desc->MipLevels == 1 && desc->SampleDesc.Count == 1 &&
+        (desc->Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) &&
+        (desc->Flags & D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS) &&
+        !(desc->Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) &&
+        vk_format(desc->Format) != VK_FORMAT_UNDEFINED;
+}
+
+HRESULT d3d12_umd_create_linear_texture(D3D12_UMD_Device *device, D3D12_UMD_Resource *resource,
+                                  D3D12DDI_HRTRESOURCE hRTResource, bool primary) {
     const D3D12_RESOURCE_DESC *desc = &resource->desc;
     if (!hRTResource.handle || desc->Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
         !desc->Width || !desc->Height || desc->DepthOrArraySize != 1 ||
@@ -267,9 +277,12 @@ HRESULT d3d12_umd_create_primary(D3D12_UMD_Device *device, D3D12_UMD_Resource *r
     };
     memset(&last_alloc, 0, sizeof(last_alloc));
     void *previous = primary_rt_resource;
+    bool previous_primary = runtime_primary;
     primary_rt_resource = hRTResource.handle;
+    runtime_primary = primary;
     vr = allocate_memory(device->vk_device, &mem_info, NULL, &resource->primary_memory);
     primary_rt_resource = previous;
+    runtime_primary = previous_primary;
     if (last_alloc.hRTResource == hRTResource.handle && last_alloc.allocation) {
         resource->hRTResource = hRTResource;
         resource->hKMAllocation = last_alloc.allocation;
@@ -328,6 +341,11 @@ HRESULT d3d12_umd_create_primary(D3D12_UMD_Device *device, D3D12_UMD_Resource *r
              resource->hKMAllocation, resource->hKMResource, (unsigned long long)desc->Width, desc->Height,
              desc->Format, blob.blob_info.strides[0]);
     return hr;
+}
+
+HRESULT d3d12_umd_create_primary(D3D12_UMD_Device *device, D3D12_UMD_Resource *resource,
+                                  D3D12DDI_HRTRESOURCE hRTResource) {
+    return d3d12_umd_create_linear_texture(device, resource, hRTResource, true);
 }
 
 void d3d12_umd_destroy_primary(D3D12_UMD_Device *device, D3D12_UMD_Resource *resource) {

@@ -209,6 +209,16 @@ static HRESULT APIENTRY create_heap_and_resource(D3D12DDI_HDEVICE hDevice, const
             resource->desc = desc;
             hr = d3d12_umd_create_primary(device, resource, hRTResource);
         }
+    } else if (heap && resource && heap_args->CPUPageProperty == D3D12DDI_CPU_PAGE_PROPERTY_NOT_AVAILABLE &&
+            d3d12_umd_shareable_texture(&desc)) {
+        /* The runtime does not pass D3D12_HEAP_FLAG_SHARED through the heap
+         * DDI. Single-sample simultaneous-access render targets must have a
+         * runtime allocation from creation so CreateSharedHandle can export
+         * them (9On12 FLIPEX asks for that handle before any Present). */
+        what = "shareable texture";
+        heap->desc = heap_desc(heap_args);
+        resource->desc = desc;
+        hr = d3d12_umd_create_linear_texture(device, resource, hRTResource, false);
     } else if (heap && resource && desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) {
         what = "committed texture";
         D3D12_HEAP_PROPERTIES props = heap_properties(heap_args);
