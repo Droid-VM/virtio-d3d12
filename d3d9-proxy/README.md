@@ -5,7 +5,7 @@
 应用的适配器选择、设备参数和 COM 对象均交给系统运行时处理。
 显式 `Direct3DCreate9On12/Ex` 调用保留调用者的 overrides 和 queues。
 
-本包针对 Windows ARM64 guest、VirtIO 驱动 1173。无需替换系统 DLL，也无需
+本包针对 Windows ARM64 guest、VirtIO 驱动 1174（64 位也支持 1173）。无需替换系统 DLL，也无需
 修改 INF 或注册表。先确认具体程序的架构：
 
 | 程序 | 使用的目录 |
@@ -52,8 +52,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Application '
 9On12 接口、系统运行时/UMD 模块、Reset 前后各 60 帧呈现及屏幕像素。
 测试窗口临时置顶，需保持桌面可见。
 
-当前验证范围是这些定向探针。尚不代表实际游戏、独占全屏、长时间运行或
-所有共享资源格式均兼容；未运行全量图形测试。
+上述探针不代表所有游戏、独占全屏、长时间运行或所有共享资源格式均兼容；
+未运行全量图形测试。ATRI 的实测结果见下文。
 
 ## 2026-09-30 验证结果
 
@@ -79,3 +79,11 @@ Windows ARM64 guest 192.168.1.121、驱动 1174 的交互桌面验证：
 x86 legacy、ex、flip 三组均退出 0；通过系统 D3D9On12/VirtIO x86 UMD
 模块检查、Reset 前后呈现及实际屏幕像素检查。非交互 SSH 会话的显式
 D3D9On12 初始化曾返回 D3DERR_NOTAVAILABLE，应在交互桌面运行呈现测试。
+
+ATRI Steam build 7599887（32 位 x86）已安装应用目录代理，启动 Logo、
+标题菜单的人物、背景和文字正常显示。进程模块确认加载游戏目录 d3d9.dll、
+系统 d3d9on12.dll，以及驱动 1174 的 dx12um_virtio_x86.dll、
+droidvm_vulkan_x86.dll 和 vulkan_freedreno_x86.dll。用户随后实际测试并确认
+“都正常”。自动交互未独立确认剧情推进；未做长期稳定性或帧率评估。
+证据：`win3d/debug-20260930/atri-1174/`。测试前的存档备份保留在 guest
+`C:\DroidVM\atri-test\save-backup-before-interaction`。
