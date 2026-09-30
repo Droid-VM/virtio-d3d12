@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <d3d9.h>
 #include <d3d12.h>
+#include <d3d12sdklayers.h>
 #include <dxgi1_4.h>
 #include <tlhelp32.h>
 #include <cstdio>
@@ -23,9 +24,20 @@ struct Device9On12 : IUnknown {
     virtual HRESULT STDMETHODCALLTYPE ReturnUnderlyingResource(IDirect3DResource9 *, UINT, UINT64 *, ID3D12Fence **) = 0;
 };
 static const GUID iid9on12 = {0xe7fda234,0xb589,0x4049,{0x94,0x0d,0x88,0x78,0x97,0x75,0x31,0xc8}};
+static ComPtr<ID3D12InfoQueue> infoQueue;
 static void check(HRESULT hr, const char *step) {
     printf("%s=0x%08lx\n", step, (unsigned long)hr);
-    if (FAILED(hr)) exit(1);
+    if (FAILED(hr)) {
+        if (infoQueue) for (UINT64 i = 0; i < infoQueue->GetNumStoredMessages(); ++i) {
+            SIZE_T size = 0;
+            infoQueue->GetMessage(i,nullptr,&size);
+            auto message = static_cast<D3D12_MESSAGE *>(malloc(size));
+            if (message && SUCCEEDED(infoQueue->GetMessage(i,message,&size)))
+                printf("D3D12 debug: %s\n",message->pDescription);
+            free(message);
+        }
+        exit(1);
+    }
 }
 #define CHECK(x) check((x), #x)
 static void require(bool ok, const char *step) {
@@ -61,12 +73,27 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
 }
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
-    bool flip = argc == 2 && strcmp(argv[1], "--flip") == 0;
-    bool present = flip || (argc == 2 && strcmp(argv[1], "--present") == 0);
-    if (argc > 1 && !present) { puts("usage: probe_d3d9on12.exe [--present|--flip]"); return 2; }
+    // Screen GetPixel uses physical pixels; keep client coordinates and the
+    // fixed-size backbuffer in that same space on scaled Windows desktops.
+    SetProcessDPIAware();
+    bool flip = false, present = false, shared = false, warp = false;
+    for (int i = 1; i < argc; ++i) {
+        if (!strcmp(argv[i],"--flip")) { flip = true; present = true; }
+        else if (!strcmp(argv[i],"--present")) present = true;
+        else if (!strcmp(argv[i],"--shared")) shared = true;
+        else if (!strcmp(argv[i],"--warp")) warp = true;
+        else { puts("usage: probe_d3d9on12.exe [--present|--flip|--shared [--warp]]"); return 2; }
+    }
+    require(!warp || shared, "WARP comparison is limited to shared-resource creation");
     // Load the system runtimes before creating any device.
     auto factoryFn = reinterpret_cast<HRESULT (WINAPI *)(REFIID,void **)>(entry(L"dxgi.dll", "CreateDXGIFactory1"));
     auto deviceFn = reinterpret_cast<HRESULT (WINAPI *)(IUnknown *,D3D_FEATURE_LEVEL,REFIID,void **)>(entry(L"d3d12.dll", "D3D12CreateDevice"));
+    if (getenv("D3D9ON12_DEBUG")) {
+        auto debugFn = reinterpret_cast<HRESULT (WINAPI *)(REFIID,void **)>(entry(L"d3d12.dll", "D3D12GetDebugInterface"));
+        ComPtr<ID3D12Debug> debug;
+        CHECK(debugFn(__uuidof(ID3D12Debug),reinterpret_cast<void **>(debug.GetAddressOf())));
+        debug->EnableDebugLayer();
+    }
     auto on12Fn = reinterpret_cast<HRESULT (WINAPI *)(UINT,D3D9ON12_ARGS *,UINT,IDirect3D9Ex **)>(entry(L"d3d9.dll", "Direct3DCreate9On12Ex"));
     ComPtr<IDXGIFactory1> factory;
     CHECK(factoryFn(__uuidof(IDXGIFactory1), reinterpret_cast<void **>(factory.GetAddressOf())));
@@ -85,9 +112,31 @@ int main(int argc, char **argv) {
             adapter = candidate; break;
         }
     }
-    require(adapter.Get() != nullptr, "VirtIO hardware adapter found");
+    if (warp) {
+        ComPtr<IDXGIFactory4> f4; CHECK(factory.As(&f4));
+        adapter.Reset();
+        CHECK(f4->EnumWarpAdapter(__uuidof(IDXGIAdapter1),reinterpret_cast<void **>(adapter.GetAddressOf())));
+        CHECK(adapter->GetDesc1(&desc));
+    }
+    require(adapter.Get() != nullptr, warp ? "WARP adapter found" : "VirtIO hardware adapter found");
     ComPtr<ID3D12Device> d12;
     CHECK(deviceFn(adapter.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), reinterpret_cast<void **>(d12.GetAddressOf())));
+    if (getenv("D3D9ON12_DEBUG")) CHECK(d12.As(&infoQueue));
+    if (shared) {
+        D3D12_HEAP_PROPERTIES props = {}; props.Type = D3D12_HEAP_TYPE_DEFAULT;
+        D3D12_RESOURCE_DESC rd = {}; rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        rd.Width = rd.Height = 256; rd.DepthOrArraySize = rd.MipLevels = 1;
+        rd.SampleDesc.Count = 1; rd.Format = DXGI_FORMAT_B8G8R8X8_UNORM;
+        rd.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS;
+        ComPtr<ID3D12Resource> resource;
+        CHECK(d12->CreateCommittedResource(&props,D3D12_HEAP_FLAG_SHARED,&rd,D3D12_RESOURCE_STATE_COMMON,
+            nullptr,__uuidof(ID3D12Resource),reinterpret_cast<void **>(resource.GetAddressOf())));
+        HANDLE handle = nullptr;
+        CHECK(d12->CreateSharedHandle(resource.Get(),nullptr,GENERIC_ALL,nullptr,&handle));
+        require(handle != nullptr, "shared handle exists");
+        CloseHandle(handle);
+        puts("RESULT=PASS"); return 0;
+    }
     D3D9ON12_ARGS args = {}; args.Enable9On12 = TRUE; args.pD3D12Device = d12.Get();
     ComPtr<IDirect3D9Ex> d9;
     CHECK(on12Fn(D3D_SDK_VERSION, &args, 1, &d9));
@@ -99,8 +148,10 @@ int main(int argc, char **argv) {
     require(ordinal != UINT_MAX, "D3D9 adapter LUID matches VirtIO");
     WNDCLASSW wc = {}; wc.lpfnWndProc = wndproc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"VirtIO9On12Probe";
     require(RegisterClassW(&wc) != 0, "RegisterClass");
+    RECT windowRect = {0,0,256,256};
+    require(AdjustWindowRect(&windowRect,WS_OVERLAPPEDWINDOW,FALSE) != FALSE, "AdjustWindowRect");
     HWND window = CreateWindowW(wc.lpszClassName, L"System D3D9On12 / VirtIO", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,CW_USEDEFAULT,400,320,nullptr,nullptr,wc.hInstance,nullptr);
+        100,100,windowRect.right-windowRect.left,windowRect.bottom-windowRect.top,nullptr,nullptr,wc.hInstance,nullptr);
     require(window != nullptr, "CreateWindow");
     D3DPRESENT_PARAMETERS pp = {}; pp.Windowed = TRUE; pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
     pp.hDeviceWindow = window; pp.BackBufferWidth = 256; pp.BackBufferHeight = 256;
@@ -167,15 +218,16 @@ int main(int argc, char **argv) {
         }
         Sleep(200);
         RECT client = {}; GetClientRect(window,&client);
-        HDC dc = GetDC(window);
-        COLORREF center = GetPixel(dc,client.right / 2,client.bottom / 2);
-        COLORREF corner = GetPixel(dc,4,4);
-        ReleaseDC(window,dc);
+        POINT origin = {}; ClientToScreen(window,&origin);
+        HDC dc = GetDC(nullptr);
+        COLORREF center = GetPixel(dc,origin.x + client.right / 2,origin.y + client.bottom / 2);
+        COLORREF corner = GetPixel(dc,origin.x + 4,origin.y + 4);
+        ReleaseDC(nullptr,dc);
         printf("window center=%06lx corner=%06lx\n",(unsigned long)center,(unsigned long)corner);
         require(center == RGB(0x40,0x80,0xc0) && corner == RGB(0x20,0x40,0x60), "visible window pixels");
     }
     CHECK(d12->GetDeviceRemovedReason());
-    texture.Reset(); readback.Reset(); rt.Reset(); underlying.Reset(); expected.Reset(); interop.Reset(); dev.Reset(); d9.Reset(); d12.Reset();
+    texture.Reset(); readback.Reset(); rt.Reset(); underlying.Reset(); expected.Reset(); interop.Reset(); dev.Reset(); d9.Reset(); infoQueue.Reset(); d12.Reset();
     DestroyWindow(window);
     puts("RESULT=PASS");
     return 0;
