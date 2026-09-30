@@ -1,0 +1,94 @@
+--- a/Samples/Desktop/D3D12ExecuteIndirect/src/D3D12ExecuteIndirect.cpp
++++ b/Samples/Desktop/D3D12ExecuteIndirect/src/D3D12ExecuteIndirect.cpp
+@@ -15,2 +14,0 @@
+-extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 618; }
+-extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = u8".\\D3D12\\"; }
+@@ -175 +173 @@
+-        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
++        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(SampleCPUHandle(m_rtvHeap.Get()));
+@@ -367 +365 @@
+-        m_device->CreateDepthStencilView(m_depthStencil.Get(), &depthStencilDesc, m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
++        m_device->CreateDepthStencilView(m_depthStencil.Get(), &depthStencilDesc, SampleCPUHandle(m_dsvHeap.Get()));
+@@ -409 +407 @@
+-        CD3DX12_CPU_DESCRIPTOR_HANDLE cbvSrvHandle(m_cbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), CbvSrvOffset, m_cbvSrvUavDescriptorSize);
++        CD3DX12_CPU_DESCRIPTOR_HANDLE cbvSrvHandle(SampleCPUHandle(m_cbvSrvUavHeap.Get()), CbvSrvOffset, m_cbvSrvUavDescriptorSize);
+@@ -497 +495 @@
+-        CD3DX12_CPU_DESCRIPTOR_HANDLE commandsHandle(m_cbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), CommandsOffset, m_cbvSrvUavDescriptorSize);
++        CD3DX12_CPU_DESCRIPTOR_HANDLE commandsHandle(SampleCPUHandle(m_cbvSrvUavHeap.Get()), CommandsOffset, m_cbvSrvUavDescriptorSize);
+@@ -506 +504 @@
+-        CD3DX12_CPU_DESCRIPTOR_HANDLE processedCommandsHandle(m_cbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), ProcessedCommandsOffset, m_cbvSrvUavDescriptorSize);
++        CD3DX12_CPU_DESCRIPTOR_HANDLE processedCommandsHandle(SampleCPUHandle(m_cbvSrvUavHeap.Get()), ProcessedCommandsOffset, m_cbvSrvUavDescriptorSize);
+@@ -723 +721 @@
+-        D3D12_GPU_DESCRIPTOR_HANDLE cbvSrvUavHandle = m_cbvSrvUavHeap->GetGPUDescriptorHandleForHeapStart();
++        D3D12_GPU_DESCRIPTOR_HANDLE cbvSrvUavHandle = SampleGPUHandle(m_cbvSrvUavHeap.Get());
+@@ -773,2 +771,2 @@
+-        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
+-        CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
++        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(SampleCPUHandle(m_rtvHeap.Get()), m_frameIndex, m_rtvDescriptorSize);
++        CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(SampleCPUHandle(m_dsvHeap.Get()));
+--- a/Samples/Desktop/D3D12ExecuteIndirect/src/DXSample.cpp
++++ b/Samples/Desktop/D3D12ExecuteIndirect/src/DXSample.cpp
+@@ -75 +75 @@
+-            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr)))
++            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)))
+@@ -98 +98 @@
+-            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr)))
++            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)))
+--- a/Samples/Desktop/D3D12ExecuteIndirect/src/DXSampleHelper.h
++++ b/Samples/Desktop/D3D12ExecuteIndirect/src/DXSampleHelper.h
+@@ -19,0 +20,16 @@
++class SampleFileHandle {
++    HANDLE h;
++public:
++    explicit SampleFileHandle(HANDLE value) : h(value) {}
++    ~SampleFileHandle() { if (h != INVALID_HANDLE_VALUE) CloseHandle(h); }
++    HANDLE Get() const { return h; }
++    SampleFileHandle(const SampleFileHandle&) = delete;
++    SampleFileHandle& operator=(const SampleFileHandle&) = delete;
++};
++inline D3D12_CPU_DESCRIPTOR_HANDLE SampleCPUHandle(ID3D12DescriptorHeap* h) {
++    D3D12_CPU_DESCRIPTOR_HANDLE value; h->GetCPUDescriptorHandleForHeapStart(&value); return value;
++}
++inline D3D12_GPU_DESCRIPTOR_HANDLE SampleGPUHandle(ID3D12DescriptorHeap* h) {
++    D3D12_GPU_DESCRIPTOR_HANDLE value; h->GetGPUDescriptorHandleForHeapStart(&value); return value;
++}
++
+@@ -81 +97 @@
+-    Wrappers::FileHandle file(CreateFile2(filename, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, &extendedParams));
++    SampleFileHandle file(CreateFile2(filename, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, &extendedParams));
+@@ -83 +99 @@
+-    Wrappers::FileHandle file(CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS, nullptr));
++    SampleFileHandle file(CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS, nullptr));
+@@ -196,2 +212,4 @@
+-#define NAME_D3D12_OBJECT(x) SetName((x).Get(), L#x)
+-#define NAME_D3D12_OBJECT_INDEXED(x, n) SetNameIndexed((x)[n].Get(), L#x, n)
++#define SAMPLE_WIDEN_(x) L##x
++#define SAMPLE_WIDEN(x) SAMPLE_WIDEN_(x)
++#define NAME_D3D12_OBJECT(x) SetName((x).Get(), SAMPLE_WIDEN(#x))
++#define NAME_D3D12_OBJECT_INDEXED(x, n) SetNameIndexed((x)[n].Get(), SAMPLE_WIDEN(#x), n)
+--- a/Samples/Desktop/D3D12ExecuteIndirect/src/stdafx.h
++++ b/Samples/Desktop/D3D12ExecuteIndirect/src/stdafx.h
+@@ -26 +26 @@
+-#include <D3Dcompiler.h>
++#include <d3dcompiler.h>
+@@ -29 +29,3 @@
+-#include <pix3.h>
++// PIX event markers disabled for standalone build.
++#define PIXBeginEvent(...) ((void)0)
++#define PIXEndEvent(...) ((void)0)
+@@ -33,0 +36,15 @@
++
++#include <string>
++#include <cstdio>
++template<> inline const GUID& __mingw_uuidof<ID3D12Device>() { return IID_ID3D12Device; }
++template<> inline const GUID& __mingw_uuidof<ID3D12CommandQueue>() { return IID_ID3D12CommandQueue; }
++template<> inline const GUID& __mingw_uuidof<ID3D12DescriptorHeap>() { return IID_ID3D12DescriptorHeap; }
++template<> inline const GUID& __mingw_uuidof<ID3D12Resource>() { return IID_ID3D12Resource; }
++template<> inline const GUID& __mingw_uuidof<ID3D12CommandAllocator>() { return IID_ID3D12CommandAllocator; }
++template<> inline const GUID& __mingw_uuidof<ID3D12RootSignature>() { return IID_ID3D12RootSignature; }
++template<> inline const GUID& __mingw_uuidof<ID3D12PipelineState>() { return IID_ID3D12PipelineState; }
++template<> inline const GUID& __mingw_uuidof<ID3D12GraphicsCommandList>() { return IID_ID3D12GraphicsCommandList; }
++template<> inline const GUID& __mingw_uuidof<ID3D12Fence>() { return IID_ID3D12Fence; }
++template<> inline const GUID& __mingw_uuidof<ID3D12CommandSignature>() { return IID_ID3D12CommandSignature; }
++
++extern "C" HRESULT WINAPI DXGIDeclareAdapterRemovalSupport(void);

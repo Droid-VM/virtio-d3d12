@@ -1,0 +1,72 @@
+--- a/Samples/Desktop/D3D12HelloWorld/src/HelloTexture/D3D12HelloTexture.cpp
++++ b/Samples/Desktop/D3D12HelloWorld/src/HelloTexture/D3D12HelloTexture.cpp
+@@ -15,2 +14,0 @@
+-extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 618; }
+-extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = u8".\\D3D12\\"; }
+@@ -133 +131 @@
+-        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
++        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(SampleCPUHandle(m_rtvHeap.Get()));
+@@ -324 +322 @@
+-        m_device->CreateShaderResourceView(m_texture.Get(), &srvDesc, m_srvHeap->GetCPUDescriptorHandleForHeapStart());
++        m_device->CreateShaderResourceView(m_texture.Get(), &srvDesc, SampleCPUHandle(m_srvHeap.Get()));
+@@ -436 +434 @@
+-    m_commandList->SetGraphicsRootDescriptorTable(0, m_srvHeap->GetGPUDescriptorHandleForHeapStart());
++    m_commandList->SetGraphicsRootDescriptorTable(0, SampleGPUHandle(m_srvHeap.Get()));
+@@ -443 +441 @@
+-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
++    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(SampleCPUHandle(m_rtvHeap.Get()), m_frameIndex, m_rtvDescriptorSize);
+--- a/Samples/Desktop/D3D12HelloWorld/src/HelloTexture/DXSample.cpp
++++ b/Samples/Desktop/D3D12HelloWorld/src/HelloTexture/DXSample.cpp
+@@ -75 +75 @@
+-            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr)))
++            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)))
+@@ -98 +98 @@
+-            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr)))
++            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)))
+--- a/Samples/Desktop/D3D12HelloWorld/src/HelloTexture/DXSampleHelper.h
++++ b/Samples/Desktop/D3D12HelloWorld/src/HelloTexture/DXSampleHelper.h
+@@ -19,0 +20,16 @@
++class SampleFileHandle {
++    HANDLE h;
++public:
++    explicit SampleFileHandle(HANDLE value) : h(value) {}
++    ~SampleFileHandle() { if (h != INVALID_HANDLE_VALUE) CloseHandle(h); }
++    HANDLE Get() const { return h; }
++    SampleFileHandle(const SampleFileHandle&) = delete;
++    SampleFileHandle& operator=(const SampleFileHandle&) = delete;
++};
++inline D3D12_CPU_DESCRIPTOR_HANDLE SampleCPUHandle(ID3D12DescriptorHeap* h) {
++    D3D12_CPU_DESCRIPTOR_HANDLE value; h->GetCPUDescriptorHandleForHeapStart(&value); return value;
++}
++inline D3D12_GPU_DESCRIPTOR_HANDLE SampleGPUHandle(ID3D12DescriptorHeap* h) {
++    D3D12_GPU_DESCRIPTOR_HANDLE value; h->GetGPUDescriptorHandleForHeapStart(&value); return value;
++}
++
+@@ -81 +97 @@
+-    Wrappers::FileHandle file(CreateFile2(filename, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, &extendedParams));
++    SampleFileHandle file(CreateFile2(filename, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, &extendedParams));
+@@ -83 +99 @@
+-    Wrappers::FileHandle file(CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS, nullptr));
++    SampleFileHandle file(CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS, nullptr));
+--- a/Samples/Desktop/D3D12HelloWorld/src/HelloTexture/stdafx.h
++++ b/Samples/Desktop/D3D12HelloWorld/src/HelloTexture/stdafx.h
+@@ -26 +26 @@
+-#include <D3Dcompiler.h>
++#include <d3dcompiler.h>
+@@ -28 +28 @@
+-#include "include/d3dx12/d3dx12.h"
++#include "d3dx12.h"
+@@ -33,0 +34,13 @@
++
++#include <string>
++#include <cstdio>
++template<> inline const GUID& __mingw_uuidof<ID3D12Device>() { return IID_ID3D12Device; }
++template<> inline const GUID& __mingw_uuidof<ID3D12CommandQueue>() { return IID_ID3D12CommandQueue; }
++template<> inline const GUID& __mingw_uuidof<ID3D12DescriptorHeap>() { return IID_ID3D12DescriptorHeap; }
++template<> inline const GUID& __mingw_uuidof<ID3D12Resource>() { return IID_ID3D12Resource; }
++template<> inline const GUID& __mingw_uuidof<ID3D12CommandAllocator>() { return IID_ID3D12CommandAllocator; }
++template<> inline const GUID& __mingw_uuidof<ID3D12RootSignature>() { return IID_ID3D12RootSignature; }
++template<> inline const GUID& __mingw_uuidof<ID3D12PipelineState>() { return IID_ID3D12PipelineState; }
++template<> inline const GUID& __mingw_uuidof<ID3D12GraphicsCommandList>() { return IID_ID3D12GraphicsCommandList; }
++template<> inline const GUID& __mingw_uuidof<ID3D12Fence>() { return IID_ID3D12Fence; }
++template<> inline const GUID& __mingw_uuidof<ID3D12CommandSignature>() { return IID_ID3D12CommandSignature; }
