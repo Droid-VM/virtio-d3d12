@@ -31,12 +31,22 @@ exports = ["LIBRARY d3d9", "EXPORTS",
            "Direct3DCreate9On12=proxy_Create9On12 @20",
            "Direct3DCreate9On12Ex=proxy_Create9On12Ex @21"]
 asm = [".text"]
-if arch == "x86_64":
+if arch in ("x86_64", "i686"):
     asm += [".intel_syntax noprefix"]
 for i,item in enumerate(entries):
     symbol = f"forward_{i}"
     exports.append(f"{item}={symbol} @{ordinal_by_name[item]}" if isinstance(item,str)
                    else f"ordinal_{item}={symbol} @{item} NONAME")
+    if arch == "i686":
+        # Public x86 D3D9 exports use stdcall; leave their arguments and
+        # return address untouched for the tail call. Preserve fastcall
+        # registers and SIMD arguments for the private forwarding entries.
+        asm += [f".globl _{symbol}", f"_{symbol}:", "push ecx", "push edx", "sub esp, 128"]
+        asm += [f"movdqu [esp+{j*16}], xmm{j}" for j in range(8)]
+        asm += [f"push {i}", "call _resolve_forward", "add esp, 4"]
+        asm += [f"movdqu xmm{j}, [esp+{j*16}]" for j in range(8)]
+        asm += ["add esp, 128", "pop edx", "pop ecx", "jmp eax"]
+        continue
     asm += [f".globl {symbol}", f".seh_proc {symbol}", f"{symbol}:"]
     if arch == "x86_64":
         # Stack arguments stay in place; save all register arguments across
@@ -62,4 +72,7 @@ for i,item in enumerate(entries):
         raise SystemExit(f"Unsupported architecture: {arch}")
     asm += [".seh_endproc"]
 (out / "forwarders.S").write_text("\n".join(asm) + "\n")
+if arch == "i686":
+    for name, size in (("Create9", 4), ("Create9Ex", 8), ("Create9On12", 12), ("Create9On12Ex", 16)):
+        exports = [line.replace(f"=proxy_{name} @", f"=proxy_{name}@{size} @") for line in exports]
 (out / "d3d9.def").write_text("\n".join(exports) + "\n")

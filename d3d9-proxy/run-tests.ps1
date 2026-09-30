@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('aarch64','arm64ec','x86_64')][string]$Arch = 'aarch64',
+    [ValidateSet('aarch64','arm64ec','x86_64','i686')][string]$Arch = 'aarch64',
     [ValidateSet('legacy','ex','flip')][string]$Mode = 'legacy'
 )
 $ErrorActionPreference = 'Stop'

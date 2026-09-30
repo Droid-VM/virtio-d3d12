@@ -13,7 +13,7 @@
 | ARM64 原生 | `aarch64/` |
 | x64 | `x86_64/` |
 | ARM64EC | `x86_64/`，使用系统支持的 x64 DLL 互操作 |
-| x86（32 位） | 本包不支持；当前未验证完整 x86 UMD 链路 |
+| x86（32 位） | `i686/`，需要驱动 1174 或更新版本中的 x86 UMD/Vulkan 链路 |
 
 也可以使用架构检测安装脚本，无需管理员权限：
 
@@ -67,3 +67,15 @@ UMD 的实际模块路径。ARM64EC 使用 x64 代理，渲染加载 ARM64EC UMD
 FLIPEX 的底层修复会将满足条件的 simultaneous-access 渲染纹理放在线性
 运行时 allocation 中，因为当前 DDI 不直接传递 API 的 SHARED heap 标志。
 这可能影响其它同类纹理的布局和性能；此次验证没有进行帧率或长期压力评估。
+
+## x86 支持（驱动 1174）
+
+`bash x86/build.sh` 构建 32 位 D3D12 UMD、Turnip 和 Vulkan loader。
+新驱动包需使用 `x86/add-to-package.py` 加入三份 `_x86.dll` 和
+`UserModeDriverNameWow` 的 D3D12 槽位，重新完整签名后由 pnputil 安装。
+不能将 x64 代理或 UMD 放入 x86 应用目录。
+
+Windows ARM64 guest 192.168.1.121、驱动 1174 的交互桌面验证：
+x86 legacy、ex、flip 三组均退出 0；通过系统 D3D9On12/VirtIO x86 UMD
+模块检查、Reset 前后呈现及实际屏幕像素检查。非交互 SSH 会话的显式
+D3D9On12 初始化曾返回 D3DERR_NOTAVAILABLE，应在交互桌面运行呈现测试。

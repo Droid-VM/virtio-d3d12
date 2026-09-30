@@ -17,7 +17,7 @@ $arch = switch ($machine) {
     0xAA64 { 'aarch64' }
     0x8664 { 'x86_64' }
     0xA641 { 'x86_64' }
-    0x014C { throw '32-bit x86 applications are not supported by this package.' }
+    0x014C { 'i686' }
     default { throw ('Unsupported PE machine: 0x{0:X4}' -f $machine) }
 }
 $source = Join-Path (Join-Path $PSScriptRoot $arch) 'd3d9.dll'

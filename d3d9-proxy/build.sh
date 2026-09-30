@@ -2,7 +2,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 out="${1:-$here/../../dist/d3d9-proxy}"
-for arch in aarch64 x86_64; do
+for arch in aarch64 x86_64 i686; do
     mkdir -p "$out/$arch"
     python3 "$here/generate_forwarders.py" "$arch" "$out/$arch"
     "${TOOLCHAIN:-/opt/llvm-mingw}/bin/$arch-w64-mingw32-clang++" \
@@ -10,7 +10,7 @@ for arch in aarch64 x86_64; do
         -I"$out/$arch" "$here/proxy.cpp" "$out/$arch/forwarders.S" "$out/$arch/d3d9.def" \
         -o "$out/$arch/d3d9.dll"
 done
-for arch in aarch64 x86_64 arm64ec; do
+for arch in aarch64 x86_64 arm64ec i686; do
     mkdir -p "$out/$arch"
     "${TOOLCHAIN:-/opt/llvm-mingw}/bin/$arch-w64-mingw32-clang++" \
         -std=c++17 -O2 -Wall -Wextra -Werror -static \
