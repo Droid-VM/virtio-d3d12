@@ -1,4 +1,4 @@
-# D3D12 fence load probe
+# Windows graphics probes
 
 ## System D3D9On12 probe
 
@@ -25,17 +25,23 @@ makes its window topmost. This is a smoke test, not game compatibility coverage.
   KMT allocation. ARM64 FLIPEX device creation returned E_INVALIDARG.
 - 1171: a lazy runtime-backed shadow surface removed that rejection, but
   kernel Present and the queue worker's CPU fence signal stalled concurrently.
-- 1172 after reboot: ARM64 passed all readback checks, 120 DISCARD presents,
+- 1172 after reboot: ARM64, ARM64EC and x64 passed all readback checks, 120 DISCARD presents,
   visible window pixel checks and normal exit 0. Blt copy command lists now
   wait for the queue worker to retire their completion fence before returning
   to the runtime's kernel Present. Native PRIMARY presentation is unchanged.
+- The existing native ARM64 D3D12 Hello Texture sample also ran for 8 seconds
+  with a live window and exited 0 after CloseMainWindow on 1172. Its UMD module
+  path was recorded. This regression checked lifecycle, not screenshot pixels.
 
 Evidence is kept under `../../debug-20260930/d3d9on12-117*/`.
 The implementation currently accepts a single-mip, single-sample 2D source
 at subresource zero with no explicit destination. It adds one GPU copy and
 a CPU completion wait per legacy present. Automatic redirection of unmodified
 D3D9 applications, FLIPEX, reset/fullscreen, shared resources and x86 support
-are not established by this probe.
+are not established by this probe. FLIPEX remains an unresolved creation
+failure; the successful path explicitly uses DISCARD. No full suite was run.
+
+## D3D12 fence load probe
 
 Build for each Windows guest architecture with llvm-mingw:
 
