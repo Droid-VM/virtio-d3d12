@@ -1,5 +1,32 @@
 # Windows graphics probes
 
+## Automatic system D3D9On12 selection (driver 1175)
+
+Driver 1175 declares `<>` in slot 0 (D3D9) of both `UserModeDriverName`
+and `UserModeDriverNameWow`. This means no native D3D9 UMD is registered;
+Windows selects its system D3D9On12 implementation. The existing D3D10/11/12
+slots are preserved. No application DLL, compatibility shim, runtime override
+or KMD change is required. `tests/enable-system-d3d9on12.py` applies this
+declaration to a new staging package; sign the complete package and install
+with pnputil. Do not modify an installed DriverStore package.
+
+Build `bash tests/build_d3d9_auto.sh`, then run `run_d3d9_auto.ps1` in the
+interactive desktop. The output directory must contain no `d3d9.dll`.
+The probe imports ordinary Direct3DCreate9/Ex and uses `--system` to require
+the system DLL path. It verifies the 9On12 interface, hardware UMD modules,
+Reset and visible pixels before and after Reset.
+
+On guest 192.168.1.121, 1174 without a proxy passed x86 legacy but failed
+ARM64 legacy CreateDevice with 0x8876086a. On 1175, all 12 combinations of
+x86/ARM64/x64/ARM64EC and legacy/ex/flip passed (exit 0). All driver binary
+payload hashes are identical to 1174; only the INF declaration changed.
+Evidence: `win3d/debug-20260930/d3d9-auto-1175/`.
+
+Investigation reference: [D3D9On12 automatic fallback observed in Intel driver
+packages](https://www.vogons.org/viewtopic.php?t=86912). The results above
+validate the behavior on this guest; they are not a guarantee for all Windows
+versions or all legacy DirectDraw/D3D8 applications.
+
 ## System D3D9On12 probe
 
 Build with `bash tests/build_d3d9on12.sh`. The default output is

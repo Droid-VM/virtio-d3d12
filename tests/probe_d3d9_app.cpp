@@ -38,21 +38,27 @@ static void draw(IDirect3DDevice9 *dev) {
 }
 int main(int argc, char **argv) {
     setvbuf(stdout,nullptr,_IONBF,0); SetProcessDPIAware();
-    bool ex = false, flip = false;
+    bool ex = false, flip = false, system = false;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i],"--ex")) ex = true;
         else if (!strcmp(argv[i],"--flip")) { ex = true; flip = true; }
+        else if (!strcmp(argv[i],"--system")) system = true;
         else return 2;
     }
     wchar_t module[MAX_PATH] = {}, expected[MAX_PATH] = {};
     HMODULE proxy = GetModuleHandleW(L"d3d9.dll");
     require(proxy != nullptr,"D3D9 imported");
     GetModuleFileNameW(proxy,module,MAX_PATH);
-    GetModuleFileNameW(nullptr,expected,MAX_PATH);
-    wchar_t *slash = wcsrchr(expected,L'\\'); require(slash != nullptr,"executable directory");
-    wcscpy(slash+1,L"d3d9.dll");
+    if (system) {
+        require(GetSystemDirectoryW(expected,MAX_PATH) != 0,"system directory");
+        wcscat(expected,L"\\d3d9.dll");
+    } else {
+        GetModuleFileNameW(nullptr,expected,MAX_PATH);
+        wchar_t *slash = wcsrchr(expected,L'\\'); require(slash != nullptr,"executable directory");
+        wcscpy(slash+1,L"d3d9.dll");
+    }
     printf("d3d9 import=%ls\n",module);
-    require(!_wcsicmp(module,expected),"app-local d3d9 loaded");
+    require(!_wcsicmp(module,expected),system ? "system d3d9 imported directly" : "app-local d3d9 loaded");
     // Race the first lazy load through functions with both scalar and pointer
     // arguments, then exercise the direct-create wrappers.
     HANDLE threads[4];
@@ -91,7 +97,7 @@ int main(int argc, char **argv) {
     CHECK(dev->QueryInterface(iid_device9on12,reinterpret_cast<void **>(&interop)));
     interop->Release();
     puts("IDirect3DDevice9On12=PASS");
-    bool system9 = false, on12 = false, umd = false;
+    bool system9 = system, on12 = false, umd = false;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE,GetCurrentProcessId());
     require(snap != INVALID_HANDLE_VALUE,"module snapshot");
     MODULEENTRY32W m = {}; m.dwSize = sizeof(m);
