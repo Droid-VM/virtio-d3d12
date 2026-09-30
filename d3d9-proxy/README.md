@@ -1,5 +1,11 @@
 # 应用目录级 D3D9 → 系统 D3D9On12 代理
 
+**驱动 1175 起通常不需要本代理。** 驱动 INF 声明无原生 D3D9 UMD，
+Windows 会自动使用系统 D3D9On12。x86、ARM64、x64、ARM64EC 的 12 组
+无代理定向测试通过；ATRI 移除代理后也已正常显示标题菜单。
+已安装本代理的应用可在关闭后用下方 `-Remove` 命令卸载。
+详见 [自动选择验证记录](../tests/README.md)。以下保留显式代理的用法。
+
 将本包对应架构的 `d3d9.dll` 放到实际 DX9 程序的 EXE 同目录，重新启动程序。
 `Direct3DCreate9` / `Direct3DCreate9Ex` 会启用 Windows 自带的 D3D9On12；
 应用的适配器选择、设备参数和 COM 对象均交给系统运行时处理。

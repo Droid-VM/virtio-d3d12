@@ -22,6 +22,14 @@ x86/ARM64/x64/ARM64EC and legacy/ex/flip passed (exit 0). All driver binary
 payload hashes are identical to 1174; only the INF declaration changed.
 Evidence: `win3d/debug-20260930/d3d9-auto-1175/`.
 
+ATRI (Steam build 7599887, x86) also reached its rendered title menu after
+removing the previously installed app-local proxy with the hash-checking
+installer. Its module snapshot contains only the system d3d9.dll plus
+system d3d9on12.dll and the x86 UMD/loader/Turnip from the 1175 DriverStore
+directory. No per-game D3D9On12 override was set. The running game was left
+open for the user; temporary scheduled tasks were deleted. This check does
+not replace long-duration gameplay validation.
+
 Investigation reference: [D3D9On12 automatic fallback observed in Intel driver
 packages](https://www.vogons.org/viewtopic.php?t=86912). The results above
 validate the behavior on this guest; they are not a guarantee for all Windows
